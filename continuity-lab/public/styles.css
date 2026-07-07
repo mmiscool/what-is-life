@@ -217,6 +217,11 @@ label {
   background: #0c0d0c;
 }
 
+.world-details {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
 .content-list,
 .journal-list {
   display: grid;
@@ -374,5 +379,9 @@ pre {
 
   .interval-control {
     grid-column: auto;
+  }
+
+  .world-details {
+    grid-template-columns: 1fr;
   }
 }

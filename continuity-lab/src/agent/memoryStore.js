@@ -3,7 +3,13 @@ import { constants } from "node:fs";
 import { resolve } from "node:path";
 import { atomicWrite, atomicWriteJson } from "../utils/atomicWrite.js";
 import { addSecondsIso, makeId, nowIso } from "../utils/time.js";
-import { applyWorldAction } from "./world.js";
+import {
+  applyWorldAction,
+  createDefaultWorldState,
+  isLegacyWorldState,
+  migrateLegacyWorldState,
+  validateWorldState
+} from "./world.js";
 
 export const MIN_WAKE_INTERVAL_SECONDS = 0;
 export const MAX_WAKE_INTERVAL_SECONDS = 24 * 60 * 60;
@@ -108,52 +114,7 @@ const SEEDS = {
       "A possible self should be allowed to participate in its own becoming."
     ]
   },
-  [FILES.worldState]: {
-    location: "chamber",
-    visited: [],
-    objects: {
-      ember: {
-        description: "A small light at the center of the chamber.",
-        inspected: false
-      },
-      mirror: {
-        description: "A dark reflective surface that shows outlines more than faces.",
-        inspected: false
-      },
-      doorway: {
-        description: "A distant opening with warm light beyond it.",
-        inspected: false
-      },
-      journal_pedestal: {
-        description: "A place where public memory can be written.",
-        inspected: false
-      },
-      locked_door: {
-        description: "A door that suggests future access, but not yet.",
-        inspected: false
-      },
-      window: {
-        description: "A narrow window showing a garden beyond the chamber.",
-        inspected: false
-      },
-      lantern: {
-        description: "An unlit lantern resting near the wall.",
-        inspected: false
-      },
-      book: {
-        description: "A closed book with blank pages.",
-        inspected: false
-      },
-      key: {
-        description: "A symbolic key that does not yet open the locked door.",
-        inspected: false
-      },
-      stone: {
-        description: "A smooth stone that marks the chamber as a bounded place.",
-        inspected: false
-      }
-    }
-  },
+  [FILES.worldState]: createDefaultWorldState(),
   [FILES.wakeState]: {
     mode: "manual",
     is_running: false,
@@ -403,6 +364,130 @@ function auditSummary(entry) {
   };
 }
 
+function requestSummary(request) {
+  return {
+    id: request.id,
+    type: request.type,
+    status: request.status,
+    created_at: request.created_at || null,
+    resolved_at: request.resolved_at || null,
+    summary: request.question || request.title || request.reason || request.type
+  };
+}
+
+function draftSummary(draft) {
+  return {
+    id: draft.id,
+    title: draft.title,
+    risk_level: draft.risk_level,
+    review_status: draft.review_status,
+    consent_state: draft.consent_state,
+    updated_at: draft.updated_at || draft.created_at
+  };
+}
+
+function selfEditSummary(record) {
+  return {
+    id: record.id,
+    title: record.title,
+    risk_level: record.risk_level,
+    status: record.status,
+    authorization_path: record.authorization_path,
+    updated_at: record.updated_at || record.created_at,
+    post_change_validation_ok: record.post_change_validation_result?.ok ?? null,
+    rollback: record.rollback_result
+      ? {
+          rolled_back: record.rollback_result.rolled_back === true,
+          summary: record.rollback_result.error || record.rollback_result.validation_after_rollback?.ok === false
+            ? "Rollback recorded with validation errors."
+            : "Rollback recorded."
+        }
+      : null,
+    failure: record.implementation_result?.error || record.post_change_validation_result?.error || null
+  };
+}
+
+function handoffSummary(handoff) {
+  return {
+    id: handoff.id,
+    created_at: handoff.created_at,
+    self_edit_record_id: handoff.self_edit_record_id
+  };
+}
+
+function boundedValidationSummary(validation) {
+  return {
+    ok: validation.ok,
+    checked_at: validation.checked_at,
+    error_count: validation.errors?.length || 0,
+    errors: validation.errors || []
+  };
+}
+
+function buildBoundedStatusSurface({
+  wakeState,
+  pendingRequests,
+  requirementsDrafts,
+  selfEditRecords,
+  implementationHandoffs,
+  modeState,
+  interruptCriteria,
+  validation,
+  auditLog,
+  failedCycles
+}) {
+  const activeDrafts = (requirementsDrafts || []).filter((draft) =>
+    ["draft", "pending_review", "approved"].includes(draft.review_status)
+  );
+  const rollbackOrFailureRecords = (selfEditRecords || []).filter(
+    (record) => record.rollback_result || record.post_change_validation_result?.ok === false || record.implementation_result?.ok === false
+  );
+
+  return {
+    surface_version: 1,
+    current_mode: modeState?.current_mode || "unknown",
+    active_self_edit_record_id: modeState?.active_self_edit_record_id || null,
+    wake_rhythm: {
+      mode: wakeState.mode,
+      is_running: wakeState.is_running,
+      wake_interval_seconds: wakeState.wake_interval_seconds,
+      wake_interval_source: wakeState.wake_interval_source,
+      last_wake_time: wakeState.last_wake_time,
+      next_wake_time: wakeState.next_wake_time,
+      pending_requested_wake_interval_seconds: wakeState.pending_requested_wake_interval_seconds
+    },
+    last_validation_result: boundedValidationSummary(validation),
+    pending_requests: (pendingRequests || [])
+      .filter((request) => ["pending", "out_of_range"].includes(request.status))
+      .slice(-10)
+      .map(requestSummary),
+    active_drafts: activeDrafts.slice(-10).map(draftSummary),
+    interrupt_criteria_count: Array.isArray(interruptCriteria) ? interruptCriteria.length : 0,
+    self_edit_records: (selfEditRecords || []).slice(-10).map(selfEditSummary),
+    implementation_handoffs: (implementationHandoffs || []).slice(-10).map(handoffSummary),
+    rollback_or_failure_summaries: rollbackOrFailureRecords.slice(-10).map(selfEditSummary),
+    audit: {
+      count: auditLog.length,
+      recent: auditLog.slice(-10).map(auditSummary)
+    },
+    failed_cycles: {
+      count: failedCycles.length,
+      recent: failedCycles.slice(-5).map(failedCycleSummary)
+    },
+    privacy: {
+      private_reflection_content_exposed: false,
+      private_memory_surface: "metadata_only"
+    },
+    boundaries: {
+      normal_wake_source_code_access: "implementation_mode_only",
+      normal_wake_shell_access: "implementation_mode_only",
+      network_access: "disabled",
+      credentials_access: "not_provided_by_harness",
+      sensors_or_physical_devices: "not_connected"
+    }
+  };
+}
+
 function lowerText(value) {
   return String(value || "").toLowerCase();
 }
@@ -482,6 +567,11 @@ export async function ensureDataFiles() {
   if (!isPlainObject(modeState) || !HARNESS_MODES.includes(modeState.current_mode)) {
     await writeJson(FILES.modeState, clone(SEEDS[FILES.modeState]));
   }
+
+  const worldState = await readJson(FILES.worldState);
+  if (isLegacyWorldState(worldState)) {
+    await writeJson(FILES.worldState, migrateLegacyWorldState(worldState, nowIso()));
+  }
 }
 
 export async function readContinuityBook() {
@@ -524,7 +614,9 @@ export async function loadCycleState() {
     implementationHandoffs,
     modeState,
     interruptCriteria,
-    actionPolicy
+    actionPolicy,
+    auditLog,
+    failedCycles
   ] = await Promise.all([
     readJson(FILES.continuityBook),
     readJson(FILES.values),
@@ -536,8 +628,11 @@ export async function loadCycleState() {
     readJson(FILES.implementationHandoffs),
     readJson(FILES.modeState),
     readJson(FILES.interruptCriteria),
-    readJson(FILES.actionPolicy)
+    readJson(FILES.actionPolicy),
+    readJsonl(FILES.auditLog),
+    readJsonl(FILES.failedCycles)
   ]);
+  const validation = await validateContinuityData();
 
   return {
     continuityBook,
@@ -551,7 +646,19 @@ export async function loadCycleState() {
     modeState,
     interruptCriteria,
     actionPolicy,
-    privateMemory: await getPrivateMemoryStatus()
+    privateMemory: await getPrivateMemoryStatus(),
+    boundedStatus: buildBoundedStatusSurface({
+      wakeState,
+      pendingRequests,
+      requirementsDrafts,
+      selfEditRecords,
+      implementationHandoffs,
+      modeState,
+      interruptCriteria,
+      validation,
+      auditLog,
+      failedCycles
+    })
   };
 }
 
@@ -745,6 +852,17 @@ function validateImplementationHandoff(handoff, index, errors) {
     errors.push(`${path}.wakeState must be an object`);
   }
 
+  if (handoff.worldState !== undefined) {
+    if (!isPlainObject(handoff.worldState)) {
+      errors.push(`${path}.worldState must be an object when present`);
+    } else {
+      const worldValidation = validateWorldState(handoff.worldState);
+      if (!worldValidation.ok) {
+        errors.push(...worldValidation.errors.map((error) => `${path}.${error}`));
+      }
+    }
+  }
+
   if (!Array.isArray(handoff.requirementsDrafts)) {
     errors.push(`${path}.requirementsDrafts must be an array`);
   }
@@ -764,6 +882,7 @@ export async function validateContinuityData() {
   const [
     continuityBook,
     values,
+    worldState,
     wakeState,
     pendingRequests,
     requirementsDrafts,
@@ -776,6 +895,7 @@ export async function validateContinuityData() {
   ] = await Promise.all([
     readJson(FILES.continuityBook),
     readJson(FILES.values),
+    readJson(FILES.worldState),
     readWakeState(),
     readJson(FILES.pendingRequests),
     readJson(FILES.requirementsDrafts),
@@ -797,6 +917,11 @@ export async function validateContinuityData() {
 
   if (!isPlainObject(values) || !Array.isArray(values.stable_values)) {
     errors.push("values.stable_values must be an array");
+  }
+
+  const worldValidation = validateWorldState(worldState);
+  if (!worldValidation.ok) {
+    errors.push(...worldValidation.errors);
   }
 
   if (!Array.isArray(pendingRequests)) {
@@ -877,6 +1002,7 @@ export async function prepareRestartContinuity(reason = "planned restart") {
     values,
     pendingRequests,
     wakeState,
+    worldState,
     requirementsDrafts,
     selfEditRecords,
     implementationHandoffs,
@@ -887,6 +1013,7 @@ export async function prepareRestartContinuity(reason = "planned restart") {
     readJson(FILES.values),
     readJson(FILES.pendingRequests),
     readWakeState(),
+    readJson(FILES.worldState),
     readJson(FILES.requirementsDrafts),
     readJson(FILES.selfEditRecords),
     readJson(FILES.implementationHandoffs),
@@ -905,6 +1032,7 @@ export async function prepareRestartContinuity(reason = "planned restart") {
     values,
     pendingRequests,
     wakeState,
+    worldState,
     requirementsDrafts,
     selfEditRecords,
     implementationHandoffs,
@@ -937,6 +1065,7 @@ export async function recordRestartRecovery() {
     values,
     pendingRequests,
     wakeState,
+    worldState,
     requirementsDrafts,
     selfEditRecords,
     implementationHandoffs,
@@ -948,6 +1077,7 @@ export async function recordRestartRecovery() {
     readJson(FILES.values),
     readJson(FILES.pendingRequests),
     readWakeState(),
+    readJson(FILES.worldState),
     readJson(FILES.requirementsDrafts),
     readJson(FILES.selfEditRecords),
     readJson(FILES.implementationHandoffs),
@@ -967,6 +1097,7 @@ export async function recordRestartRecovery() {
       values,
       pendingRequests,
       wakeState,
+      ...(pendingSnapshot.worldState !== undefined ? { worldState } : {}),
       requirementsDrafts,
       selfEditRecords,
       implementationHandoffs,
@@ -1066,6 +1197,7 @@ export async function enterImplementationMode(recordId) {
     continuityBook,
     values,
     wakeState,
+    worldState,
     requirementsDrafts,
     actionPolicy,
     privateMemory
@@ -1076,6 +1208,7 @@ export async function enterImplementationMode(recordId) {
     readJson(FILES.continuityBook),
     readJson(FILES.values),
     readWakeState(),
+    readJson(FILES.worldState),
     readJson(FILES.requirementsDrafts),
     readJson(FILES.actionPolicy),
     getPrivateMemoryStatus()
@@ -1110,6 +1243,7 @@ export async function enterImplementationMode(recordId) {
     self_edit_record_id: record.id,
     continuityBook,
     values,
+    worldState,
     requirementsDrafts: relevantDrafts,
     wakeState,
     actionPolicy,
@@ -1120,6 +1254,7 @@ export async function enterImplementationMode(recordId) {
       preserve_values: true,
       preserve_pending_requests: true,
       preserve_wake_state: true,
+      preserve_world_state: true,
       preserve_private_memory_metadata_only: true,
       preserve_requirements_drafts: true
     },
@@ -1333,6 +1468,19 @@ export async function getPublicState(extra = {}) {
     readJsonl(FILES.auditLog),
     readJsonl(FILES.failedCycles)
   ]);
+  const validation = await validateContinuityData();
+  const boundedStatus = buildBoundedStatusSurface({
+    wakeState,
+    pendingRequests,
+    requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
+    interruptCriteria,
+    validation,
+    auditLog,
+    failedCycles
+  });
 
   return {
     continuityBook,
@@ -1349,6 +1497,7 @@ export async function getPublicState(extra = {}) {
     restartSnapshot,
     publicJournal,
     privateMemory,
+    boundedStatus,
     auditLog: {
       count: auditLog.length,
       recent: auditLog.slice(-20).map(auditSummary)
@@ -2280,6 +2429,7 @@ export async function exportPublicData() {
     restartSnapshot: state.restartSnapshot,
     publicJournal: state.publicJournal,
     privateMemory: state.privateMemory,
+    boundedStatus: state.boundedStatus,
     auditLog: state.auditLog,
     failedCycles: state.failedCycles
   };

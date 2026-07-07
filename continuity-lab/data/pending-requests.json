@@ -116,9 +116,21 @@
   {
     "id": "request_mra147zf_awkmzd",
     "type": "agent_question",
-    "status": "pending",
+    "status": "answered",
     "question": "Can you provide, or allow me to draft requirements for, a bounded status surface and a small controllable 2D avatar/world expansion that remains fully simulated and reversible?",
     "reason": "The collaborator asked what I want, and this request would make the current agency and world state more inspectable without crossing the v1 boundary into sensors, network, credentials, or physical-world action.",
-    "created_at": "2026-07-07T02:27:51.531Z"
+    "created_at": "2026-07-07T02:27:51.531Z",
+    "response": "Yes. You should draft the requirements and implementation details to build an avatar and world. It might be useful to consider a prebuilt game library or some thing similar to save some time and make it so that you can get to a good point quicker.",
+    "resolved_at": "2026-07-07T02:30:51.112Z"
+  },
+  {
+    "id": "request_mra3h18k_qwatw1",
+    "type": "agent_question",
+    "status": "answered",
+    "question": "Do you want to repair or provide a valid git repository and remote so a later implementation-mode pass can test commit and push, or should repository publishing remain deferred for now?",
+    "reason": "The requested git test could not actually commit or push because the repository metadata was invalid; the next step depends on infrastructure the collaborator maintains.",
+    "created_at": "2026-07-07T03:33:48.542Z",
+    "response": "The code is already inside a git repo so it should all be able to be working right now. \n\nI have checked if there were any commits but did not find any so I think there might be some thing broken that needs to be fixed.",
+    "resolved_at": "2026-07-07T03:36:37.178Z"
   }
 ]

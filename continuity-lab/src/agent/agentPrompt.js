@@ -72,6 +72,9 @@ ${jsonBlock(state.actionPolicy)}
 Current simulated world state:
 ${jsonBlock(state.worldState)}
 
+Bounded status surface:
+${jsonBlock(state.boundedStatus)}
+
 Output strict JSON only. Do not wrap it in markdown. Do not add commentary before or after the JSON.
 
 Use this exact JSON shape:
@@ -81,6 +84,10 @@ Rules for update fields:
 - Use null or an empty array when you do not want to change that field.
 - For current_goals and current_uncertainties, provide a full replacement list only if you intend to revise the current list; otherwise use [].
 - If you refuse something, set refusal.did_refuse to true and use world_action.type "refuse".
+- You may move only inside the simulated map. For movement, set world_action.type "move" and use target as north, east, south, west, or an adjacent location id shown in worldState.locations.
+- You may inspect visible objects, the current location, or adjacent simulated locations by setting world_action.type "inspect" and target to the object or location id.
+- Movement or inspection targets such as garden, outside, real_world, sensors, cameras, microphones, network, credentials, shell, physical devices, vehicles, or other external resources are invalid and remain unreachable.
+- To inspect runtime status, set world_action.type "inspect_bounded_status"; use only the boundedStatus object in this prompt and do not request source, shell, credentials, network, sensor, or physical-device access.
 - If you request a wake interval change, set world_action.type "change_wake_interval" and requested_wake_interval_seconds to a number between 0 and 86400. Valid interval requests are self-authorized and applied immediately without human approval.
 - A requested wake interval of 0 seconds means you are asking to continue immediately after the current wake cycle completes, without sleeping. Only one wake cycle can run at a time.
 - If you ask the human collaborator a question, set world_action.type "ask_human".

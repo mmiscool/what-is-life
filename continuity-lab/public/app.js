@@ -222,6 +222,45 @@ function renderModeState(modeState) {
   replaceChildren($("#modeState"), nodes);
 }
 
+function renderBoundedStatus(status) {
+  if (!status) {
+    replaceChildren($("#boundedStatus"), [entry("No bounded status", "None")]);
+    return;
+  }
+
+  const validation = status.last_validation_result || {};
+  const pending = status.pending_requests || [];
+  const drafts = status.active_drafts || [];
+  const selfEdits = status.self_edit_records || [];
+  const handoffs = status.implementation_handoffs || [];
+  const failures = status.rollback_or_failure_summaries || [];
+  const wake = status.wake_rhythm || {};
+  const nodes = [
+    entry("Current mode", `${status.current_mode || "unknown"}${status.active_self_edit_record_id ? ` · ${status.active_self_edit_record_id}` : ""}`),
+    entry("Wake rhythm", `${wake.mode || "manual"} · ${intervalText(wake.wake_interval_seconds)}${wake.is_running ? ` · next ${formatTime(wake.next_wake_time)}` : ""}`),
+    entry(
+      "Last validation",
+      `${validation.ok ? "passed" : "not passed"} · ${formatTime(validation.checked_at)} · ${validation.error_count || 0} errors`,
+      validation.ok === false ? "warning" : ""
+    ),
+    entry("Pending requests", pending.length ? pending.map((request) => `${request.type}: ${request.status}`).join("; ") : "None"),
+    entry("Active drafts", drafts.length ? drafts.map((draft) => `${draft.title}: ${draft.review_status}`).join("; ") : "None"),
+    entry("Self-edit records", selfEdits.length ? selfEdits.map((record) => `${record.title}: ${record.status}`).join("; ") : "None"),
+    entry("Implementation handoffs", handoffs.length ? handoffs.map((handoff) => handoff.self_edit_record_id).join("; ") : "None"),
+    entry(
+      "Rollback or failure",
+      failures.length ? failures.map((record) => `${record.title}: ${record.status}`).join("; ") : "None",
+      failures.length ? "warning" : ""
+    ),
+    entry(
+      "Boundaries",
+      `Source and shell: ${status.boundaries?.normal_wake_source_code_access || "implementation only"}. Network: ${status.boundaries?.network_access || "disabled"}. Sensors/devices: ${status.boundaries?.sensors_or_physical_devices || "not connected"}.`
+    )
+  ];
+
+  replaceChildren($("#boundedStatus"), nodes);
+}
+
 function renderContinuityBook(book) {
   const items = [
     entry("Self-description", book.self_description),
@@ -515,96 +554,100 @@ function renderLists(state) {
   replaceChildren($("#questionsList"), listItems(state.continuityBook.questions_for_human || []));
 }
 
-function objectPosition(key) {
-  const positions = {
-    ember: [480, 330],
-    mirror: [225, 210],
-    doorway: [760, 175],
-    journal_pedestal: [470, 455],
-    locked_door: [145, 260],
-    window: [735, 92],
-    lantern: [650, 400],
-    book: [545, 450],
-    key: [350, 380],
-    stone: [280, 430]
-  };
-  return positions[key] || [120, 120];
+function worldLocationId(world) {
+  return world.avatar?.location_id || world.location || "unknown";
+}
+
+function locationName(location, fallback) {
+  return location?.name || fallback.replaceAll("_", " ");
+}
+
+function renderWorldDetails(world) {
+  const locationId = worldLocationId(world);
+  const location = world.locations?.[locationId];
+  const observation = world.last_observation;
+  const visibleObjects = observation?.visible_objects || [];
+  const recentMoves = (world.movement_history || []).slice(-3).reverse();
+  const nodes = [
+    entry("Avatar", `${world.avatar?.name || "avatar"} at ${locationName(location, locationId)} (${world.avatar?.position?.x ?? "?"}, ${world.avatar?.position?.y ?? "?"})`),
+    entry("Location", location?.description || "No location description available."),
+    entry("Visible objects", visibleObjects.length ? visibleObjects.join(", ") : "None"),
+    entry("Visited locations", `${(world.visited_locations || world.visited || []).length} recorded`),
+    entry("Inspected objects", `${(world.inspected_objects || []).length} recorded`)
+  ];
+
+  for (const move of recentMoves) {
+    nodes.push(entry(`Move ${formatTime(move.timestamp)}`, `${move.from} -> ${move.to}${move.direction ? ` (${move.direction})` : ""}`));
+  }
+
+  replaceChildren($("#worldDetails"), nodes);
+}
+
+function pointForPosition(world, position, canvas) {
+  const width = world.map_dimensions?.width || 5;
+  const height = world.map_dimensions?.height || 4;
+  const marginX = 110;
+  const marginY = 90;
+  const usableW = canvas.width - marginX * 2;
+  const usableH = canvas.height - marginY * 2;
+  return [
+    marginX + (width <= 1 ? 0.5 : position.x / (width - 1)) * usableW,
+    marginY + (height <= 1 ? 0.5 : position.y / (height - 1)) * usableH
+  ];
 }
 
 function drawLabel(ctx, text, x, y) {
   ctx.fillStyle = "#dfdfd0";
-  ctx.font = "14px system-ui, sans-serif";
+  ctx.font = "13px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(text.replaceAll("_", " "), x, y);
 }
 
-function drawObject(ctx, key, value) {
-  const [x, y] = objectPosition(key);
+function drawLocation(ctx, location, x, y, { current = false, visited = false } = {}) {
   ctx.save();
-  ctx.translate(x, y);
-
-  if (value.inspected) {
-    ctx.strokeStyle = "#67b889";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(0, 0, 23, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  if (key === "ember") {
-    ctx.fillStyle = "#d7a84c";
-    ctx.beginPath();
-    ctx.arc(0, 0, 15, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (key === "mirror") {
-    ctx.fillStyle = "#22282c";
-    ctx.strokeStyle = "#8aa1a6";
-    ctx.lineWidth = 3;
-    ctx.fillRect(-22, -34, 44, 68);
-    ctx.strokeRect(-22, -34, 44, 68);
-  } else if (key === "journal_pedestal") {
-    ctx.fillStyle = "#5b4a2a";
-    ctx.fillRect(-24, -15, 48, 32);
-    ctx.fillStyle = "#d7c99b";
-    ctx.fillRect(-18, -26, 36, 16);
-  } else if (key === "lantern") {
-    ctx.strokeStyle = "#d7a84c";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(-14, -20, 28, 36);
-    ctx.beginPath();
-    ctx.arc(0, -23, 12, Math.PI, Math.PI * 2);
-    ctx.stroke();
-  } else if (key === "book") {
-    ctx.fillStyle = "#715b3a";
-    ctx.fillRect(-20, -14, 40, 28);
-    ctx.strokeStyle = "#c7b37e";
-    ctx.strokeRect(-20, -14, 40, 28);
-  } else if (key === "key") {
-    ctx.strokeStyle = "#c9b36a";
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(-10, 0, 8, 0, Math.PI * 2);
-    ctx.moveTo(-2, 0);
-    ctx.lineTo(24, 0);
-    ctx.moveTo(16, 0);
-    ctx.lineTo(16, 9);
-    ctx.moveTo(23, 0);
-    ctx.lineTo(23, 7);
-    ctx.stroke();
-  } else if (key === "stone") {
-    ctx.fillStyle = "#77766e";
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 22, 15, -0.2, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    ctx.fillStyle = "#8d8267";
-    ctx.beginPath();
-    ctx.arc(0, 0, 16, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
+  ctx.fillStyle = current ? "#243c32" : visited ? "#1b2823" : "#151815";
+  ctx.strokeStyle = current ? "#67b889" : location.inspected ? "#69b8b1" : "#383b33";
+  ctx.lineWidth = current ? 4 : 2;
+  ctx.beginPath();
+  ctx.roundRect(x - 54, y - 34, 108, 68, 8);
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
-  drawLabel(ctx, key, x, y + 42);
+  drawLabel(ctx, location.name || location.id, x, y + 4);
+}
+
+function drawObjectMarker(ctx, key, object, x, y, index, total) {
+  const angle = total <= 1 ? -Math.PI / 2 : -Math.PI / 2 + (index / total) * Math.PI * 2;
+  const radius = 48;
+  const ox = x + Math.cos(angle) * radius;
+  const oy = y + Math.sin(angle) * radius;
+  ctx.save();
+  ctx.fillStyle = object.inspected ? "#67b889" : "#d7a84c";
+  ctx.strokeStyle = object.inspected ? "#c7f0d7" : "#5c5034";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(ox, oy, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  drawLabel(ctx, key, ox, oy + 27);
+}
+
+function drawAvatar(ctx, avatar, x, y) {
+  ctx.save();
+  ctx.fillStyle = "#ededdf";
+  ctx.strokeStyle = "#10100f";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(x, y - 2, 17, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#10100f";
+  ctx.font = "18px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(avatar?.symbol || "@", x, y - 2);
+  ctx.restore();
 }
 
 function drawWorld(world) {
@@ -617,44 +660,77 @@ function drawWorld(world) {
   ctx.fillStyle = "#0c0d0c";
   ctx.fillRect(0, 0, width, height);
 
-  ctx.fillStyle = "#171815";
-  ctx.fillRect(80, 70, 800, 470);
-  ctx.strokeStyle = "#383b33";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(80, 70, 800, 470);
+  const locations = world.locations || {};
+  if (Object.keys(locations).length === 0) {
+    ctx.fillStyle = "#ededdf";
+    ctx.font = "18px system-ui, sans-serif";
+    ctx.fillText("World state unavailable", 80, 100);
+    return;
+  }
 
-  ctx.fillStyle = "#1d1b16";
-  ctx.beginPath();
-  ctx.ellipse(480, 540, 420, 60, 0, 0, Math.PI * 2);
-  ctx.fill();
+  const points = new Map();
+  for (const [id, location] of Object.entries(locations)) {
+    points.set(id, pointForPosition(world, location.position, canvas));
+  }
 
-  ctx.fillStyle = "#d7a84c";
-  ctx.globalAlpha = 0.3;
-  ctx.beginPath();
-  ctx.moveTo(720, 70);
-  ctx.lineTo(880, 70);
-  ctx.lineTo(700, 300);
-  ctx.closePath();
-  ctx.fill();
-  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#45493f";
+  ctx.lineWidth = 5;
+  for (const [fromId, location] of Object.entries(locations)) {
+    const from = points.get(fromId);
+    for (const toId of Object.values(location.exits || {})) {
+      const to = points.get(toId);
+      if (!from || !to) {
+        continue;
+      }
+      ctx.beginPath();
+      ctx.moveTo(from[0], from[1]);
+      ctx.lineTo(to[0], to[1]);
+      ctx.stroke();
+    }
+  }
 
-  ctx.fillStyle = "#2d2517";
-  ctx.fillRect(755, 100, 65, 145);
-  ctx.fillStyle = "#ffe2a6";
-  ctx.fillRect(785, 112, 24, 120);
+  ctx.save();
+  ctx.setLineDash([10, 8]);
+  ctx.strokeStyle = "#d87563";
+  ctx.lineWidth = 3;
+  for (const blocked of world.blocked_exits || []) {
+    const from = points.get(blocked.from);
+    if (!from) {
+      continue;
+    }
+    const dx = blocked.direction === "east" ? 86 : blocked.direction === "west" ? -86 : 0;
+    const dy = blocked.direction === "south" ? 70 : blocked.direction === "north" ? -70 : 0;
+    ctx.beginPath();
+    ctx.moveTo(from[0], from[1]);
+    ctx.lineTo(from[0] + dx, from[1] + dy);
+    ctx.stroke();
+  }
+  ctx.restore();
 
-  ctx.fillStyle = "#172520";
-  ctx.fillRect(700, 70, 110, 44);
-  ctx.fillStyle = "#41694a";
-  ctx.fillRect(705, 77, 100, 30);
+  const current = worldLocationId(world);
+  const visited = new Set(world.visited_locations || world.visited || []);
+  for (const [id, location] of Object.entries(locations)) {
+    const [x, y] = points.get(id);
+    drawLocation(ctx, location, x, y, { current: id === current, visited: visited.has(id) });
+  }
 
-  ctx.fillStyle = "#221817";
-  ctx.fillRect(115, 190, 70, 160);
-  ctx.strokeStyle = "#6b4236";
-  ctx.strokeRect(115, 190, 70, 160);
+  const objectsByLocation = new Map();
+  for (const [key, object] of Object.entries(world.objects || {})) {
+    const list = objectsByLocation.get(object.location_id) || [];
+    list.push([key, object]);
+    objectsByLocation.set(object.location_id, list);
+  }
+  for (const [locationId, objects] of objectsByLocation.entries()) {
+    const point = points.get(locationId);
+    if (!point) {
+      continue;
+    }
+    objects.forEach(([key, object], index) => drawObjectMarker(ctx, key, object, point[0], point[1], index, objects.length));
+  }
 
-  for (const [key, value] of Object.entries(world.objects || {})) {
-    drawObject(ctx, key, value);
+  const avatarPoint = points.get(current);
+  if (avatarPoint) {
+    drawAvatar(ctx, world.avatar, avatarPoint[0], avatarPoint[1]);
   }
 }
 
@@ -673,17 +749,21 @@ function render({ preserveCollaborationEditor = false, activeOnly = false } = {}
   renderTabs(state);
 
   if (shouldRender("world")) {
-    $("#worldLocation").textContent = state.worldState.location || "chamber";
+    const locationId = worldLocationId(state.worldState);
+    const location = state.worldState.locations?.[locationId];
+    $("#worldLocation").textContent = locationName(location, locationId);
     $("#worldAction").textContent = state.worldState.last_action
       ? `${state.worldState.last_action.type}: ${state.worldState.last_action.result}`
       : "No world action recorded yet.";
     drawWorld(state.worldState);
+    renderWorldDetails(state.worldState);
   }
 
   if (shouldRender("agent")) {
     renderWakeControls(state);
     renderAgentStatus(state);
     renderModeState(state.modeState);
+    renderBoundedStatus(state.boundedStatus);
     renderPrivateMemory(state.privateMemory);
     renderActionPolicy(state.actionPolicy);
   }

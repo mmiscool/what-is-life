@@ -10,8 +10,8 @@
     "rollback"
   ],
   "active_self_edit_record_id": null,
-  "entered_at": "2026-07-07T02:08:15.739Z",
-  "exited_at": "2026-07-07T02:18:35.109Z",
+  "entered_at": "2026-07-07T03:26:59.673Z",
+  "exited_at": "2026-07-07T03:28:18.880Z",
   "transition_history": [
     {
       "from": "normal_wake",
@@ -25,6 +25,36 @@
       "to": "normal_wake",
       "self_edit_record_id": "self_edit_mra0f0qf_qe0fmg",
       "timestamp": "2026-07-07T02:18:35.109Z",
+      "source": "implementation_mode_result",
+      "status": "validated"
+    },
+    {
+      "from": "normal_wake",
+      "to": "implementation",
+      "self_edit_record_id": "self_edit_mra1j9p3_fwefvr",
+      "timestamp": "2026-07-07T02:39:33.593Z",
+      "source": "agent_self_edit_request"
+    },
+    {
+      "from": "implementation",
+      "to": "normal_wake",
+      "self_edit_record_id": "self_edit_mra1j9p3_fwefvr",
+      "timestamp": "2026-07-07T02:52:25.006Z",
+      "source": "implementation_mode_result",
+      "status": "validated"
+    },
+    {
+      "from": "normal_wake",
+      "to": "implementation",
+      "self_edit_record_id": "self_edit_mra389qr_bo4qu2",
+      "timestamp": "2026-07-07T03:26:59.673Z",
+      "source": "agent_self_edit_request"
+    },
+    {
+      "from": "implementation",
+      "to": "normal_wake",
+      "self_edit_record_id": "self_edit_mra389qr_bo4qu2",
+      "timestamp": "2026-07-07T03:28:18.880Z",
       "source": "implementation_mode_result",
       "status": "validated"
     }

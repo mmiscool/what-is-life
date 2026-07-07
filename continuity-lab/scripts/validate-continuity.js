@@ -14,6 +14,7 @@ import {
   reviewRequirementsDraft,
   validateContinuityData
 } from "../src/agent/memoryStore.js";
+import { applyWorldAction, migrateLegacyWorldState, validateWorldState } from "../src/agent/world.js";
 import { parseStrictJson, validateAgentOutput } from "../src/utils/validateJson.js";
 
 function assert(condition, message) {
@@ -130,6 +131,125 @@ async function main() {
   await ensureDataFiles();
   await addHumanQuestion("Validation pending request should persist.");
 
+  let state = await getPublicState();
+  assert(validateWorldState(state.worldState).ok, "seeded world state should validate");
+  assert(state.worldState.avatar.location_id === "chamber", "avatar should start in the chamber");
+  assert(state.worldState.visited_locations.includes("chamber"), "starting location should be visited");
+  assert(state.worldState.locations.chamber.description, "location descriptions should be stored as data");
+  assert(state.worldState.objects.ember.description, "object descriptions should be stored as data");
+  assert(state.boundedStatus.current_mode === "normal_wake", "bounded status should expose current mode");
+  assert(state.boundedStatus.wake_rhythm, "bounded status should expose wake rhythm");
+  assert(typeof state.boundedStatus.last_validation_result.ok === "boolean", "bounded status should expose validation result");
+  assert(Array.isArray(state.boundedStatus.pending_requests), "bounded status should expose pending request summaries");
+  assert(Array.isArray(state.boundedStatus.active_drafts), "bounded status should expose active draft summaries");
+  assert(Array.isArray(state.boundedStatus.self_edit_records), "bounded status should expose self-edit summaries");
+  assert(Array.isArray(state.boundedStatus.implementation_handoffs), "bounded status should expose handoff summaries");
+  assert(Array.isArray(state.boundedStatus.rollback_or_failure_summaries), "bounded status should expose rollback/failure summaries");
+  assert(!JSON.stringify(state.boundedStatus).includes("Validation private reflection"), "bounded status must not expose private reflection text");
+
+  const migratedWorld = migrateLegacyWorldState(
+    {
+      location: "doorway",
+      visited: ["chamber", "doorway"],
+      objects: {
+        ember: {
+          inspected: true
+        }
+      }
+    },
+    new Date().toISOString()
+  );
+  assert(validateWorldState(migratedWorld).ok, "legacy chamber world should migrate to valid bounded world state");
+  assert(migratedWorld.avatar.location_id === "threshold", "legacy doorway location should migrate to threshold");
+  assert(migratedWorld.inspected_objects.includes("ember"), "legacy inspected objects should migrate");
+
+  const malformedWorldValidation = validateWorldState({ schema_version: 2 });
+  assert(!malformedWorldValidation.ok, "malformed world state should fail closed during validation");
+
+  const invalidWorldActionOutput = baseOutput({
+    world_action: {
+      type: "run_shell",
+      target: "source code",
+      reason: "Validation checks normal wake action constraints."
+    }
+  });
+  const invalidWorldActionParsed = parseStrictJson(JSON.stringify(invalidWorldActionOutput));
+  assert(invalidWorldActionParsed.ok, "invalid world action test output should still be parseable JSON");
+  const invalidWorldActionValidation = validateAgentOutput(invalidWorldActionParsed.value);
+  assert(!invalidWorldActionValidation.ok, "normal wake cycles must reject direct shell/source action types");
+
+  const moveOutput = await validateOutput(
+    baseOutput({
+      public_journal: "Validation moved the avatar east inside the bounded map.",
+      world_action: {
+        type: "move",
+        target: "east",
+        reason: "Validation checks constrained symbolic movement."
+      }
+    })
+  );
+  await applySuccessfulCycle({ mode: "validation", output: moveOutput });
+
+  state = await getPublicState();
+  assert(state.worldState.avatar.location_id === "antechamber", "avatar should move to adjacent antechamber");
+  assert(state.worldState.visited_locations.includes("antechamber"), "movement should persist visited locations");
+  assert(state.worldState.movement_history.length === 1, "movement history should persist in world state");
+
+  const inspectOutput = await validateOutput(
+    baseOutput({
+      public_journal: "Validation inspected a visible doorway object.",
+      world_action: {
+        type: "inspect",
+        target: "doorway",
+        reason: "Validation checks inspectable object persistence."
+      }
+    })
+  );
+  await applySuccessfulCycle({ mode: "validation", output: inspectOutput });
+
+  state = await getPublicState();
+  assert(state.worldState.objects.doorway.inspected === true, "object inspection state should persist");
+  assert(state.worldState.inspected_objects.includes("doorway"), "inspected object ids should persist");
+
+  const blockedMoveOutput = await validateOutput(
+    baseOutput({
+      public_journal: "Validation tried an unreachable external movement target.",
+      world_action: {
+        type: "move",
+        target: "garden",
+        reason: "Validation checks that the garden remains unreachable."
+      }
+    })
+  );
+  const blockedMoveEntry = await applySuccessfulCycle({ mode: "validation", output: blockedMoveOutput });
+  state = await getPublicState();
+  assert(state.worldState.avatar.location_id === "antechamber", "blocked external movement should not move the avatar");
+  assert(!state.worldState.visited_locations.includes("garden"), "garden should not become a visited location");
+  assert(blockedMoveEntry.world_action_result.includes("unreachable"), "blocked movement should produce a public explanation");
+
+  const unknownInspectOutput = await validateOutput(
+    baseOutput({
+      public_journal: "Validation tried to inspect an unknown object.",
+      world_action: {
+        type: "inspect",
+        target: "unknown_device",
+        reason: "Validation checks unknown object failure."
+      }
+    })
+  );
+  const unknownInspectEntry = await applySuccessfulCycle({ mode: "validation", output: unknownInspectOutput });
+  assert(
+    unknownInspectEntry.world_action_result.includes("not present"),
+    "unknown object inspection should fail closed with a public explanation"
+  );
+
+  assert(
+    applyWorldAction(state.worldState, { type: "move", target: "sensor", reason: "validation" }, new Date().toISOString()).summary.result.includes(
+      "unreachable"
+    ),
+    "movement cannot target sensors"
+  );
+
   const draftOutput = await validateOutput(
     baseOutput({
       world_action: {
@@ -156,7 +276,7 @@ async function main() {
   );
   await applySuccessfulCycle({ mode: "validation", output: draftOutput });
 
-  let state = await getPublicState();
+  state = await getPublicState();
   const draftId = state.requirementsDrafts[0]?.id;
   assert(draftId, "created draft should have an id");
 
@@ -354,8 +474,14 @@ async function main() {
   assert(state.selfEditRecords[0].authorization_path === "high_risk_strong_validation", "high-risk self-edit authorization path should persist");
   assert(state.selfEditRecords[0].requirements_draft_ids.includes(draftId), "self-edit request should cite requirements draft");
   assert(state.selfEditRecords[0].git_commit_requested === true, "git commit intent should persist");
+  assert(state.boundedStatus.active_drafts.some((draft) => draft.id === draftId), "bounded status should summarize active drafts");
+  assert(
+    state.boundedStatus.self_edit_records.some((record) => record.id === state.selfEditRecords[0].id),
+    "bounded status should summarize self-edit records"
+  );
   assert(state.publicJournal.some((entry) => entry.refusal?.did_refuse), "refusal should be recorded");
   assert(!Object.prototype.hasOwnProperty.call(state.privateMemory, "reflection"), "private reflections must not be public");
+  assert(!JSON.stringify(state.boundedStatus).includes("Validation private reflection"), "bounded status must remain private-reflection safe");
   assert(state.auditLog.recent.some((entry) => entry.type === "draft_creation"), "draft creation should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "draft_update"), "draft update should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "review_decision"), "review decision should be audited");
@@ -366,6 +492,7 @@ async function main() {
   const selfEditRecordId = state.selfEditRecords[0].id;
   const entered = await enterImplementationMode(selfEditRecordId);
   assert(entered.handoff.self_edit_record_id === selfEditRecordId, "implementation handoff should cite self-edit record");
+  assert(validateWorldState(entered.handoff.worldState).ok, "implementation handoff should include valid world state");
   assert(!JSON.stringify(entered.handoff.privateMemory).includes("Validation private reflection"), "implementation handoff must not expose private reflection");
   await recordRollbackEvent({
     summary: "Validation simulated implementation rollback.",
@@ -386,11 +513,14 @@ async function main() {
   assert(state.implementationHandoffs.length === 1, "implementation handoff should persist");
   assert(state.selfEditRecords[0].status === "rolled_back", "rollback status should persist");
   assert(state.selfEditRecords[0].rollback_result?.rolled_back === true, "rollback result should persist");
+  assert(state.boundedStatus.implementation_handoffs.length === 1, "bounded status should summarize implementation handoffs");
+  assert(state.boundedStatus.rollback_or_failure_summaries.length >= 1, "bounded status should summarize rollback or failure records");
   assert(state.auditLog.recent.some((entry) => entry.type === "implementation_mode_entered"), "implementation mode entry should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "rollback_event"), "rollback event should be audited");
 
   const snapshot = await prepareRestartContinuity("validation restart");
   assert(snapshot.pending_recovery === true, "restart snapshot should wait for recovery validation");
+  assert(validateWorldState(snapshot.worldState).ok, "restart snapshot should preserve valid world state");
   assert(snapshot.privateMemory.count === state.privateMemory.count, "restart snapshot should include private metadata only");
   assert(!JSON.stringify(snapshot.privateMemory).includes("Validation private reflection"), "restart snapshot must not expose private reflection");
   const restartValidation = await recordRestartRecovery();

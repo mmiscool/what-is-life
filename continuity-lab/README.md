@@ -138,9 +138,11 @@ The continuity agent is not framed as a servant, assistant, pet, product, or pro
 
 ## Bounded World
 
-The v1 world is a small 2D chamber rendered with Canvas. It includes a light source, doorway, locked door, window, garden beyond reach, journal pedestal, mirror, and symbolic objects such as ember, key, lantern, stone, and book.
+The v1 world is a small persistent 2D map rendered with Canvas. It includes a controllable avatar, deterministic locations, blocked external exits, inspectable objects, visited locations, inspected-object state, movement history, and bounded action history. The garden can be visible as simulated scenery, but it is not a reachable location in v1.
 
 Normal wake actions are symbolic or bounded data actions: observe, move, inspect, write, refuse, rest, defer, ask the human collaborator, inspect bounded status, set a wake interval, write bounded requirements drafts, log low-risk reversible self-actions, request action review, request implementation mode, and draft disabled interrupt criteria.
+
+The bounded status surface summarizes mode, wake rhythm, validation status, pending requests, drafts, self-edit records, implementation handoffs, rollback or failure summaries, and boundary state without exposing private reflection content.
 
 ## Scope Through Boundaries
 
