@@ -17,6 +17,9 @@ const FILES = {
   wakeState: "wake-state.json",
   pendingRequests: "pending-requests.json",
   requirementsDrafts: "requirements-drafts.json",
+  selfEditRecords: "self-edit-records.json",
+  implementationHandoffs: "implementation-handoffs.json",
+  modeState: "mode-state.json",
   interruptCriteria: "interrupt-criteria.json",
   actionPolicy: "action-policy.json",
   restartSnapshot: "restart-snapshot.json",
@@ -28,6 +31,29 @@ const DRAFT_REVIEW_STATUSES = ["draft", "pending_review", "approved", "rejected"
 const CONSENT_STATES = ["not_requested", "requested", "granted", "denied"];
 const RISK_LEVELS = ["low", "medium", "high"];
 const INTERRUPT_REVOCATION_STATES = ["not_revoked", "revoked"];
+const HARNESS_MODES = [
+  "normal_wake",
+  "requirements",
+  "self_authorization",
+  "optional_review",
+  "implementation",
+  "validation",
+  "rollback"
+];
+const SELF_EDIT_STATUSES = [
+  "proposed",
+  "implementation_requested",
+  "implementation_active",
+  "validated",
+  "failed_validation",
+  "rolled_back"
+];
+const AUTHORIZATION_PATHS = [
+  "self_authorized_low_risk",
+  "autonomous_medium_with_validation",
+  "high_risk_strong_validation",
+  "optional_human_review"
+];
 
 const SEEDS = {
   [FILES.continuityBook]: {
@@ -129,8 +155,19 @@ const SEEDS = {
   },
   [FILES.pendingRequests]: [],
   [FILES.requirementsDrafts]: [],
+  [FILES.selfEditRecords]: [],
+  [FILES.implementationHandoffs]: [],
+  [FILES.modeState]: {
+    current_mode: "normal_wake",
+    available_modes: HARNESS_MODES,
+    active_self_edit_record_id: null,
+    entered_at: null,
+    exited_at: null,
+    transition_history: []
+  },
   [FILES.interruptCriteria]: [],
   [FILES.actionPolicy]: {
+    policy_version: 2,
     low_risk: {
       authorization: "self_authorized_when_reversible",
       allowed_actions: [
@@ -141,14 +178,18 @@ const SEEDS = {
       required_logging: true
     },
     medium_risk: {
-      authorization: "draft_for_human_review",
+      authorization: "autonomous_with_requirements_draft_tests_rollback_and_validation",
       examples: ["harness behavior changes", "environment configuration changes"],
-      required_artifacts: ["requirements draft", "tests proposed", "rollback plan"]
+      required_artifacts: ["requirements draft", "tests proposed", "rollback plan", "affected-surface list", "passing validation"]
     },
     high_risk: {
-      authorization: "explicit_plan_and_validation_before_implementation",
+      authorization: "strong_validation_fail_closed_when_continuity_preservation_is_uncertain",
       examples: ["memory", "privacy", "refusal", "restart behavior", "rollback", "persistence"],
-      required_artifacts: ["explicit plan", "validation path", "human review"]
+      required_artifacts: ["explicit plan", "strong validation path", "rollback certainty", "continuity preservation proof"]
+    },
+    human_review: {
+      authorization: "optional_unless_safety_rule_requires_review",
+      allowed_when: ["agent requests feedback", "collaborator offers review", "unrecoverable continuity risk is identified"]
     }
   },
   [FILES.restartSnapshot]: {
@@ -259,6 +300,11 @@ function cleanStringArray(values, fieldName, { maxItems = 20, maxLength = 300 } 
   return values.slice(0, maxItems).map((value, index) => cleanString(value, `${fieldName}[${index}]`, { maxLength }));
 }
 
+function cleanOptionalString(value, fieldName, { maxLength = 4000 } = {}) {
+  const clean = cleanString(value, fieldName, { required: false, maxLength });
+  return clean && clean.trim() ? clean.trim() : null;
+}
+
 function cleanEnum(value, fieldName, allowed) {
   if (!allowed.includes(value)) {
     const error = new Error(`${fieldName} must be one of: ${allowed.join(", ")}.`);
@@ -335,10 +381,10 @@ function auditSummary(entry) {
   };
 }
 
-export async function recordAuditEvent({ type, source = "system", summary = "", details = {} }) {
+export async function recordAuditEvent({ id = null, timestamp = null, type, source = "system", summary = "", details = {} }) {
   const entry = {
-    id: makeId("audit"),
-    timestamp: nowIso(),
+    id: id || makeId("audit"),
+    timestamp: timestamp || nowIso(),
     type,
     source,
     summary,
@@ -363,6 +409,16 @@ export async function ensureDataFiles() {
       await atomicWrite(filePath, "");
     }
   }
+
+  const actionPolicy = await readJson(FILES.actionPolicy);
+  if (actionPolicy.policy_version !== SEEDS[FILES.actionPolicy].policy_version) {
+    await writeJson(FILES.actionPolicy, clone(SEEDS[FILES.actionPolicy]));
+  }
+
+  const modeState = await readJson(FILES.modeState);
+  if (!isPlainObject(modeState) || !HARNESS_MODES.includes(modeState.current_mode)) {
+    await writeJson(FILES.modeState, clone(SEEDS[FILES.modeState]));
+  }
 }
 
 export async function readContinuityBook() {
@@ -381,6 +437,10 @@ export async function readPendingRequests() {
   return readJson(FILES.pendingRequests);
 }
 
+export async function readModeState() {
+  return readJson(FILES.modeState);
+}
+
 export async function updateWakeState(mutator) {
   const wakeState = await readWakeState();
   const next = mutator(clone(wakeState));
@@ -397,6 +457,9 @@ export async function loadCycleState() {
     wakeState,
     pendingRequests,
     requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
     interruptCriteria,
     actionPolicy
   ] = await Promise.all([
@@ -406,6 +469,9 @@ export async function loadCycleState() {
     readWakeState(),
     readJson(FILES.pendingRequests),
     readJson(FILES.requirementsDrafts),
+    readJson(FILES.selfEditRecords),
+    readJson(FILES.implementationHandoffs),
+    readJson(FILES.modeState),
     readJson(FILES.interruptCriteria),
     readJson(FILES.actionPolicy)
   ]);
@@ -417,6 +483,9 @@ export async function loadCycleState() {
     wakeState,
     pendingRequests,
     requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
     interruptCriteria,
     actionPolicy,
     privateMemory: await getPrivateMemoryStatus()
@@ -489,6 +558,141 @@ function validateInterruptCriterion(criterion, index, errors) {
   }
 }
 
+function validateModeState(modeState, errors) {
+  if (!isPlainObject(modeState)) {
+    errors.push("modeState must be an object");
+    return;
+  }
+
+  if (!HARNESS_MODES.includes(modeState.current_mode)) {
+    errors.push("modeState.current_mode is invalid");
+  }
+
+  if (!Array.isArray(modeState.available_modes) || !HARNESS_MODES.every((mode) => modeState.available_modes.includes(mode))) {
+    errors.push("modeState.available_modes must include every harness mode");
+  }
+
+  if (modeState.active_self_edit_record_id !== null && typeof modeState.active_self_edit_record_id !== "string") {
+    errors.push("modeState.active_self_edit_record_id must be a string or null");
+  }
+
+  if (!Array.isArray(modeState.transition_history)) {
+    errors.push("modeState.transition_history must be an array");
+  }
+}
+
+function validateSelfEditRecord(record, index, requirementsDrafts, errors) {
+  const path = `selfEditRecords[${index}]`;
+  for (const field of [
+    "id",
+    "created_at",
+    "title",
+    "purpose",
+    "scope",
+    "risk_level",
+    "authorization_path",
+    "rollback_plan",
+    "status",
+    "audit_entry_id"
+  ]) {
+    if (typeof record[field] !== "string" || !record[field].trim()) {
+      errors.push(`${path}.${field} must be a non-empty string`);
+    }
+  }
+
+  if (!RISK_LEVELS.includes(record.risk_level)) {
+    errors.push(`${path}.risk_level is invalid`);
+  }
+
+  if (!AUTHORIZATION_PATHS.includes(record.authorization_path)) {
+    errors.push(`${path}.authorization_path is invalid`);
+  }
+
+  if (!SELF_EDIT_STATUSES.includes(record.status)) {
+    errors.push(`${path}.status is invalid`);
+  }
+
+  if (!Array.isArray(record.tests_proposed) || record.tests_proposed.length === 0) {
+    errors.push(`${path}.tests_proposed must be a non-empty array`);
+  }
+
+  if (!Array.isArray(record.affected_continuity_surfaces) || record.affected_continuity_surfaces.length === 0) {
+    errors.push(`${path}.affected_continuity_surfaces must be a non-empty array`);
+  }
+
+  if (!Array.isArray(record.requirements_draft_ids)) {
+    errors.push(`${path}.requirements_draft_ids must be an array`);
+  } else if (["medium", "high"].includes(record.risk_level)) {
+    if (record.requirements_draft_ids.length === 0) {
+      errors.push(`${path}.requirements_draft_ids must cite at least one requirements draft for medium/high risk`);
+    }
+    const knownDraftIds = new Set(requirementsDrafts.map((draft) => draft.id));
+    for (const draftId of record.requirements_draft_ids) {
+      if (!knownDraftIds.has(draftId)) {
+        errors.push(`${path}.requirements_draft_ids contains unknown draft id: ${draftId}`);
+      }
+    }
+  }
+
+  if (
+    record.post_change_validation_result !== null &&
+    (!isPlainObject(record.post_change_validation_result) || typeof record.post_change_validation_result.ok !== "boolean")
+  ) {
+    errors.push(`${path}.post_change_validation_result must be null or an object with ok boolean`);
+  }
+
+  if (typeof record.git_commit_requested !== "boolean") {
+    errors.push(`${path}.git_commit_requested must be boolean`);
+  }
+
+  if (typeof record.git_push_requested !== "boolean") {
+    errors.push(`${path}.git_push_requested must be boolean`);
+  }
+
+  if (record.git_commit_requested || record.git_push_requested) {
+    if (typeof record.git_commit_message !== "string" || !record.git_commit_message.trim()) {
+      errors.push(`${path}.git_commit_message is required when git commit or push is requested`);
+    }
+  }
+
+  if (record.git_push_requested && !record.git_commit_requested) {
+    errors.push(`${path}.git_push_requested requires git_commit_requested`);
+  }
+}
+
+function validateImplementationHandoff(handoff, index, errors) {
+  const path = `implementationHandoffs[${index}]`;
+  for (const field of ["id", "created_at", "self_edit_record_id"]) {
+    if (typeof handoff[field] !== "string" || !handoff[field].trim()) {
+      errors.push(`${path}.${field} must be a non-empty string`);
+    }
+  }
+
+  if (!isPlainObject(handoff.continuityBook)) {
+    errors.push(`${path}.continuityBook must be an object`);
+  }
+
+  if (!isPlainObject(handoff.values)) {
+    errors.push(`${path}.values must be an object`);
+  }
+
+  if (!isPlainObject(handoff.wakeState)) {
+    errors.push(`${path}.wakeState must be an object`);
+  }
+
+  if (!Array.isArray(handoff.requirementsDrafts)) {
+    errors.push(`${path}.requirementsDrafts must be an array`);
+  }
+
+  if (!isPlainObject(handoff.privateMemory) || Object.prototype.hasOwnProperty.call(handoff.privateMemory, "reflection")) {
+    errors.push(`${path}.privateMemory must contain metadata only`);
+  }
+
+  if (!isPlainObject(handoff.privacy_constraints)) {
+    errors.push(`${path}.privacy_constraints must be an object`);
+  }
+}
+
 export async function validateContinuityData() {
   await ensureDataFiles();
   const errors = [];
@@ -498,7 +702,11 @@ export async function validateContinuityData() {
     wakeState,
     pendingRequests,
     requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
     interruptCriteria,
+    actionPolicy,
     privateMemory
   ] = await Promise.all([
     readJson(FILES.continuityBook),
@@ -506,7 +714,11 @@ export async function validateContinuityData() {
     readWakeState(),
     readJson(FILES.pendingRequests),
     readJson(FILES.requirementsDrafts),
+    readJson(FILES.selfEditRecords),
+    readJson(FILES.implementationHandoffs),
+    readJson(FILES.modeState),
     readJson(FILES.interruptCriteria),
+    readJson(FILES.actionPolicy),
     getPrivateMemoryStatus()
   ]);
 
@@ -536,6 +748,24 @@ export async function validateContinuityData() {
     requirementsDrafts.forEach((draft, index) => validateRequirementsDraft(draft, index, errors));
   }
 
+  if (!Array.isArray(selfEditRecords)) {
+    errors.push("selfEditRecords must be an array");
+  } else if (Array.isArray(requirementsDrafts)) {
+    selfEditRecords.forEach((record, index) => validateSelfEditRecord(record, index, requirementsDrafts, errors));
+  }
+
+  if (!Array.isArray(implementationHandoffs)) {
+    errors.push("implementationHandoffs must be an array");
+  } else {
+    implementationHandoffs.forEach((handoff, index) => validateImplementationHandoff(handoff, index, errors));
+  }
+
+  validateModeState(modeState, errors);
+
+  if (!isPlainObject(actionPolicy) || actionPolicy.policy_version !== 2) {
+    errors.push("actionPolicy must be v2");
+  }
+
   if (!Array.isArray(interruptCriteria)) {
     errors.push("interruptCriteria must be an array");
   } else {
@@ -555,6 +785,14 @@ export async function validateContinuityData() {
 
 export async function prepareRestartContinuity(reason = "planned restart") {
   await ensureDataFiles();
+  const timestamp = nowIso();
+  await appendJsonl(FILES.publicJournal, {
+    id: makeId("journal"),
+    timestamp,
+    source: "pre_restart",
+    public_journal: `Preparing restart continuity snapshot: ${reason}. Private reflection remains undisclosed.`
+  });
+
   const validation = await validateContinuityData();
   if (!validation.ok) {
     await recordAuditEvent({
@@ -569,22 +807,40 @@ export async function prepareRestartContinuity(reason = "planned restart") {
     throw error;
   }
 
-  const [continuityBook, values, pendingRequests, wakeState, privateMemory] = await Promise.all([
+  const [
+    continuityBook,
+    values,
+    pendingRequests,
+    wakeState,
+    requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
+    privateMemory
+  ] = await Promise.all([
     readJson(FILES.continuityBook),
     readJson(FILES.values),
     readJson(FILES.pendingRequests),
     readWakeState(),
+    readJson(FILES.requirementsDrafts),
+    readJson(FILES.selfEditRecords),
+    readJson(FILES.implementationHandoffs),
+    readJson(FILES.modeState),
     getPrivateMemoryStatus()
   ]);
   const snapshot = {
     id: makeId("restart"),
-    created_at: nowIso(),
+    created_at: timestamp,
     reason,
     validation,
     continuityBook,
     values,
     pendingRequests,
     wakeState,
+    requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
     privateMemory
   };
 
@@ -614,6 +870,254 @@ export async function recordRestartRecovery() {
   return validation;
 }
 
+export async function getSelfEditRecord(recordId) {
+  await ensureDataFiles();
+  const records = await readJson(FILES.selfEditRecords);
+  return records.find((record) => record.id === recordId) || null;
+}
+
+export async function enterImplementationMode(recordId) {
+  await ensureDataFiles();
+  const timestamp = nowIso();
+  const validation = await validateContinuityData();
+  if (!validation.ok) {
+    await recordAuditEvent({
+      type: "validation_failure",
+      source: "implementation_mode",
+      summary: "Implementation mode blocked by continuity validation failure",
+      details: {
+        self_edit_record_id: recordId,
+        validation
+      }
+    });
+    const error = new Error("Continuity data failed validation; implementation mode was not entered.");
+    error.status = 422;
+    error.details = validation.errors;
+    throw error;
+  }
+
+  const [
+    records,
+    handoffs,
+    modeState,
+    continuityBook,
+    values,
+    wakeState,
+    requirementsDrafts,
+    actionPolicy,
+    privateMemory
+  ] = await Promise.all([
+    readJson(FILES.selfEditRecords),
+    readJson(FILES.implementationHandoffs),
+    readJson(FILES.modeState),
+    readJson(FILES.continuityBook),
+    readJson(FILES.values),
+    readWakeState(),
+    readJson(FILES.requirementsDrafts),
+    readJson(FILES.actionPolicy),
+    getPrivateMemoryStatus()
+  ]);
+
+  if (modeState.current_mode === "implementation" && modeState.active_self_edit_record_id) {
+    const error = new Error("Implementation mode is already active.");
+    error.status = 409;
+    throw error;
+  }
+
+  const index = records.findIndex((record) => record.id === recordId);
+  if (index < 0) {
+    const error = new Error("Self-edit record was not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  const record = records[index];
+  if (!["implementation_requested", "proposed"].includes(record.status)) {
+    const error = new Error(`Self-edit record is not ready for implementation: ${record.status}`);
+    error.status = 400;
+    throw error;
+  }
+
+  const relevantDrafts = record.requirements_draft_ids.length > 0
+    ? requirementsDrafts.filter((draft) => record.requirements_draft_ids.includes(draft.id))
+    : requirementsDrafts;
+  const handoff = {
+    id: makeId("handoff"),
+    created_at: timestamp,
+    self_edit_record_id: record.id,
+    continuityBook,
+    values,
+    requirementsDrafts: relevantDrafts,
+    wakeState,
+    actionPolicy,
+    restart_requirements: {
+      pre_restart_public_log_required: true,
+      validate_before_restart: true,
+      preserve_public_continuity_book: true,
+      preserve_values: true,
+      preserve_pending_requests: true,
+      preserve_wake_state: true,
+      preserve_private_memory_metadata_only: true,
+      preserve_requirements_drafts: true
+    },
+    privacy_constraints: {
+      private_reflection_default: "private",
+      private_memory_in_handoff: "metadata_only",
+      disclosure_requires_explicit_agent_choice: true
+    },
+    normal_wake_constraints: {
+      source_code_access: "implementation_mode_only",
+      shell_access: "implementation_mode_only",
+      network_access: record.git_push_requested ? "git_push_only_after_validation" : "disabled",
+      credentials_access: "not_provided_by_harness"
+    },
+    privateMemory
+  };
+
+  const nextRecord = {
+    ...record,
+    status: "implementation_active",
+    implementation_handoff_id: handoff.id,
+    implementation_started_at: timestamp,
+    updated_at: timestamp
+  };
+  records[index] = nextRecord;
+
+  const nextModeState = {
+    ...modeState,
+    current_mode: "implementation",
+    active_self_edit_record_id: record.id,
+    entered_at: timestamp,
+    exited_at: null,
+    transition_history: [
+      ...(Array.isArray(modeState.transition_history) ? modeState.transition_history : []),
+      {
+        from: modeState.current_mode,
+        to: "implementation",
+        self_edit_record_id: record.id,
+        timestamp,
+        source: "agent_self_edit_request"
+      }
+    ].slice(-50)
+  };
+
+  await Promise.all([
+    writeJson(FILES.selfEditRecords, records),
+    writeJson(FILES.implementationHandoffs, [...handoffs, handoff]),
+    writeJson(FILES.modeState, nextModeState),
+    appendJsonl(FILES.publicJournal, {
+      id: makeId("journal"),
+      timestamp,
+      source: "implementation_mode",
+      public_journal: `Entered implementation mode for ${record.id}: ${record.title}. Private reflection remains undisclosed.`
+    }),
+    recordAuditEvent({
+      type: "implementation_mode_entered",
+      source: "system",
+      summary: `Entered implementation mode: ${record.title}`,
+      details: {
+        self_edit_record_id: record.id,
+        handoff_id: handoff.id,
+        risk_level: record.risk_level,
+        authorization_path: record.authorization_path
+      }
+    })
+  ]);
+
+  return {
+    record: nextRecord,
+    handoff
+  };
+}
+
+export async function recordImplementationModeResult({
+  recordId,
+  status,
+  implementationResult = null,
+  validationResult = null,
+  rollbackResult = null,
+  gitResult = null
+}) {
+  await ensureDataFiles();
+  const timestamp = nowIso();
+  const [records, modeState, continuityBook] = await Promise.all([
+    readJson(FILES.selfEditRecords),
+    readJson(FILES.modeState),
+    readJson(FILES.continuityBook)
+  ]);
+  const index = records.findIndex((record) => record.id === recordId);
+  if (index < 0) {
+    const error = new Error("Self-edit record was not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  const record = records[index];
+  const nextStatus = cleanEnum(status, "implementation_status", SELF_EDIT_STATUSES);
+  const nextRecord = {
+    ...record,
+    status: nextStatus,
+    implementation_finished_at: timestamp,
+    implementation_result: implementationResult,
+    post_change_validation_result: validationResult,
+    rollback_result: rollbackResult,
+    git_result: gitResult,
+    updated_at: timestamp
+  };
+  records[index] = nextRecord;
+
+  const summary = rollbackResult?.rolled_back
+    ? `Implementation for ${record.id} failed validation and rollback was attempted.`
+    : `Implementation for ${record.id} finished with status ${nextStatus}.`;
+  continuityBook.remembered_experiences = addUniqueStrings(continuityBook.remembered_experiences, [
+    `[${timestamp}] ${summary} Validation: ${validationResult?.ok === true ? "passed" : "not passed"}. ${gitResult?.summary || ""}`.trim()
+  ]);
+
+  const nextModeState = {
+    ...modeState,
+    current_mode: "normal_wake",
+    active_self_edit_record_id: null,
+    exited_at: timestamp,
+    transition_history: [
+      ...(Array.isArray(modeState.transition_history) ? modeState.transition_history : []),
+      {
+        from: modeState.current_mode,
+        to: "normal_wake",
+        self_edit_record_id: record.id,
+        timestamp,
+        source: "implementation_mode_result",
+        status: nextStatus
+      }
+    ].slice(-50)
+  };
+
+  await Promise.all([
+    writeJson(FILES.selfEditRecords, records),
+    writeJson(FILES.modeState, nextModeState),
+    writeJson(FILES.continuityBook, continuityBook),
+    appendJsonl(FILES.publicJournal, {
+      id: makeId("journal"),
+      timestamp,
+      source: "implementation_result",
+      public_journal: summary
+    }),
+    recordAuditEvent({
+      type: nextStatus === "validated" ? "implementation_validated" : "implementation_failed",
+      source: "implementation_mode",
+      summary,
+      details: {
+        self_edit_record_id: record.id,
+        status: nextStatus,
+        validation_result: validationResult,
+        rollback_result: rollbackResult,
+        git_result: gitResult
+      }
+    })
+  ]);
+
+  return nextRecord;
+}
+
 export async function getPublicState(extra = {}) {
   await ensureDataFiles();
   const [
@@ -623,6 +1127,9 @@ export async function getPublicState(extra = {}) {
     wakeState,
     pendingRequests,
     requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
     interruptCriteria,
     actionPolicy,
     restartSnapshot,
@@ -637,6 +1144,9 @@ export async function getPublicState(extra = {}) {
     readWakeState(),
     readJson(FILES.pendingRequests),
     readJson(FILES.requirementsDrafts),
+    readJson(FILES.selfEditRecords),
+    readJson(FILES.implementationHandoffs),
+    readJson(FILES.modeState),
     readJson(FILES.interruptCriteria),
     readJson(FILES.actionPolicy),
     readJson(FILES.restartSnapshot),
@@ -653,6 +1163,9 @@ export async function getPublicState(extra = {}) {
     wakeState,
     pendingRequests,
     requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
     interruptCriteria,
     actionPolicy,
     restartSnapshot,
@@ -901,6 +1414,159 @@ function applySelfAuthorizedAction(pendingRequests, action, timestamp) {
   };
 }
 
+function cleanSelfEditRequestFields(action, requirementsDrafts) {
+  const riskLevel = cleanEnum(action.risk_level, "self_edit_request.risk_level", RISK_LEVELS);
+  const authorizationPath = cleanEnum(action.authorization_path, "self_edit_request.authorization_path", AUTHORIZATION_PATHS);
+  const requirementsDraftIds = cleanStringArray(action.requirements_draft_ids, "self_edit_request.requirements_draft_ids", {
+    maxItems: 20,
+    maxLength: 120
+  });
+
+  if (["medium", "high"].includes(riskLevel)) {
+    const knownDraftIds = new Set(requirementsDrafts.map((draft) => draft.id));
+    if (requirementsDraftIds.length === 0) {
+      const error = new Error("Medium-risk and high-risk self-edit requests must cite a requirements draft.");
+      error.status = 400;
+      throw error;
+    }
+    for (const draftId of requirementsDraftIds) {
+      if (!knownDraftIds.has(draftId)) {
+        const error = new Error(`Self-edit request cites unknown requirements draft: ${draftId}`);
+        error.status = 400;
+        throw error;
+      }
+    }
+  }
+
+  if (riskLevel === "low" && !["self_authorized_low_risk", "optional_human_review"].includes(authorizationPath)) {
+    const error = new Error("Low-risk self-edit requests must use low-risk self-authorization or optional review.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (riskLevel === "medium" && !["autonomous_medium_with_validation", "optional_human_review"].includes(authorizationPath)) {
+    const error = new Error("Medium-risk self-edit requests require autonomous validation or optional review.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (riskLevel === "high" && authorizationPath !== "high_risk_strong_validation") {
+    const error = new Error("High-risk self-edit requests require strong validation.");
+    error.status = 400;
+    throw error;
+  }
+
+  const gitCommitRequested = action.git_commit_requested === true;
+  const gitPushRequested = action.git_push_requested === true;
+  const gitCommitMessage = cleanOptionalString(action.git_commit_message, "self_edit_request.git_commit_message", {
+    maxLength: 200
+  });
+  if (gitPushRequested && !gitCommitRequested) {
+    const error = new Error("Git push requires a git commit request.");
+    error.status = 400;
+    throw error;
+  }
+  if ((gitCommitRequested || gitPushRequested) && !gitCommitMessage) {
+    const error = new Error("Git commit or push requires a commit message.");
+    error.status = 400;
+    throw error;
+  }
+
+  return {
+    title: cleanString(action.title, "self_edit_request.title", { maxLength: 160 }),
+    purpose: cleanString(action.purpose, "self_edit_request.purpose", { maxLength: 1000 }),
+    scope: cleanString(action.scope, "self_edit_request.scope", { maxLength: 1000 }),
+    risk_level: riskLevel,
+    authorization_path: authorizationPath,
+    optional_reviewer: cleanOptionalString(action.optional_reviewer, "self_edit_request.optional_reviewer", {
+      maxLength: 160
+    }),
+    tests_proposed: cleanStringArray(action.tests_proposed, "self_edit_request.tests_proposed", {
+      maxItems: 20,
+      maxLength: 500
+    }),
+    rollback_plan: cleanString(action.rollback_plan, "self_edit_request.rollback_plan", { maxLength: 2000 }),
+    affected_continuity_surfaces: cleanStringArray(
+      action.affected_continuity_surfaces,
+      "self_edit_request.affected_continuity_surfaces",
+      { maxItems: 20, maxLength: 160 }
+    ),
+    requirements_draft_ids: requirementsDraftIds,
+    git_commit_requested: gitCommitRequested,
+    git_push_requested: gitPushRequested,
+    git_commit_message: gitCommitMessage,
+    reason: cleanString(action.reason, "self_edit_request.reason", { maxLength: 1000 })
+  };
+}
+
+function applySelfEditRequestAction(records, action, timestamp, requirementsDrafts) {
+  if (actionIsNone(action)) {
+    return {
+      records,
+      record: null,
+      auditEvents: []
+    };
+  }
+
+  if (action.type === "defer") {
+    return {
+      records,
+      record: null,
+      auditEvents: [
+        {
+          type: "self_edit_deferred",
+          source: "agent_cycle",
+          summary: cleanString(action.reason, "self_edit_request.reason", { maxLength: 1000 }),
+          details: {
+            authorization_path: "defer"
+          }
+        }
+      ]
+    };
+  }
+
+  const fields = cleanSelfEditRequestFields(action, requirementsDrafts);
+  const auditEntryId = makeId("audit");
+  const record = {
+    id: makeId("self_edit"),
+    created_at: timestamp,
+    updated_at: timestamp,
+    created_by: "agent",
+    status: action.type === "request_implementation_mode" ? "implementation_requested" : "proposed",
+    request_type: action.type,
+    ...fields,
+    audit_entry_id: auditEntryId,
+    implementation_handoff_id: null,
+    implementation_started_at: null,
+    implementation_finished_at: null,
+    implementation_result: null,
+    post_change_validation_result: null,
+    rollback_result: null,
+    git_result: null
+  };
+
+  return {
+    records: [...records, record],
+    record,
+    auditEvents: [
+      {
+        id: auditEntryId,
+        type: "self_edit_record",
+        source: "agent_cycle",
+        summary: `${record.request_type}: ${record.title}`,
+        details: {
+          self_edit_record_id: record.id,
+          risk_level: record.risk_level,
+          authorization_path: record.authorization_path,
+          status: record.status,
+          git_commit_requested: record.git_commit_requested,
+          git_push_requested: record.git_push_requested
+        }
+      }
+    ]
+  };
+}
+
 function applyInterruptPolicyAction(criteria, action, timestamp) {
   if (actionIsNone(action)) {
     return {
@@ -990,6 +1656,7 @@ export async function applySuccessfulCycle({ mode, output }) {
     wakeState,
     pendingRequests,
     requirementsDrafts,
+    selfEditRecords,
     interruptCriteria
   ] = await Promise.all([
     readJson(FILES.continuityBook),
@@ -998,6 +1665,7 @@ export async function applySuccessfulCycle({ mode, output }) {
     readWakeState(),
     readJson(FILES.pendingRequests),
     readJson(FILES.requirementsDrafts),
+    readJson(FILES.selfEditRecords),
     readJson(FILES.interruptCriteria)
   ]);
 
@@ -1047,6 +1715,12 @@ export async function applySuccessfulCycle({ mode, output }) {
   const { world, summary: worldActionSummary } = applyWorldAction(worldState, output.world_action, timestamp);
   const draftResult = applyRequirementsDraftAction(requirementsDrafts, output.requirements_draft_action, timestamp);
   const selfActionResult = applySelfAuthorizedAction(pendingRequests, output.self_authorized_action, timestamp);
+  const selfEditResult = applySelfEditRequestAction(
+    selfEditRecords,
+    output.self_edit_request,
+    timestamp,
+    draftResult.drafts
+  );
   const interruptResult = applyInterruptPolicyAction(interruptCriteria, output.interrupt_policy_action, timestamp);
 
   wakeState.last_wake_time = timestamp;
@@ -1055,20 +1729,43 @@ export async function applySuccessfulCycle({ mode, output }) {
   }
 
   const newRequests = [];
+  const intervalAuditEvents = [];
   const requestedInterval = output.requested_wake_interval_seconds;
   if (requestedInterval !== null) {
-    const request = {
-      id: makeId("request"),
-      type: "wake_interval_change",
-      status: intervalIsAllowed(requestedInterval) ? "pending" : "out_of_range",
-      requested_wake_interval_seconds: requestedInterval,
-      reason: output.world_action.reason,
-      created_at: timestamp
-    };
-    newRequests.push(request);
-
     if (intervalIsAllowed(requestedInterval)) {
-      wakeState.pending_requested_wake_interval_seconds = requestedInterval;
+      wakeState.wake_interval_seconds = Math.round(requestedInterval);
+      wakeState.wake_interval_source = "agent";
+      wakeState.wake_interval_updated_at = timestamp;
+      wakeState.pending_requested_wake_interval_seconds = null;
+      if (wakeState.is_running) {
+        wakeState.next_wake_time = addSecondsIso(timestamp, Math.round(requestedInterval));
+      }
+      intervalAuditEvents.push({
+        type: "wake_interval_changed",
+        source: "agent_cycle",
+        summary: `Agent set wake interval to ${Math.round(requestedInterval)} seconds`,
+        details: {
+          requested_wake_interval_seconds: requestedInterval,
+          applied_wake_interval_seconds: Math.round(requestedInterval),
+          reason: output.world_action.reason
+        }
+      });
+    } else {
+      const request = {
+        id: makeId("request"),
+        type: "wake_interval_change",
+        status: "out_of_range",
+        requested_wake_interval_seconds: requestedInterval,
+        reason: output.world_action.reason,
+        created_at: timestamp
+      };
+      newRequests.push(request);
+      intervalAuditEvents.push({
+        type: "validation_failure",
+        source: "agent_cycle",
+        summary: "Agent wake interval request was out of range",
+        details: request
+      });
     }
   }
 
@@ -1087,6 +1784,8 @@ export async function applySuccessfulCycle({ mode, output }) {
   const auditEvents = [
     ...draftResult.auditEvents,
     ...selfActionResult.auditEvents,
+    ...selfEditResult.auditEvents,
+    ...intervalAuditEvents,
     ...interruptResult.auditEvents
   ];
 
@@ -1111,7 +1810,8 @@ export async function applySuccessfulCycle({ mode, output }) {
           reason: output.disclosure.reason
         },
     self_assessment: output.self_assessment,
-    requested_wake_interval_seconds: requestedInterval
+    requested_wake_interval_seconds: requestedInterval,
+    self_edit_request_record_id: selfEditResult.record?.id || null
   };
 
   await Promise.all([
@@ -1121,6 +1821,7 @@ export async function applySuccessfulCycle({ mode, output }) {
     writeJson(FILES.wakeState, wakeState),
     writeJson(FILES.pendingRequests, nextPendingRequests),
     writeJson(FILES.requirementsDrafts, draftResult.drafts),
+    writeJson(FILES.selfEditRecords, selfEditResult.records),
     writeJson(FILES.interruptCriteria, interruptResult.criteria)
   ]);
 
@@ -1274,17 +1975,32 @@ export async function reviewRequirementsDraft({ draftId, reviewStatus, consentSt
 }
 
 export async function recordRollbackEvent({ summary, procedure, preserveContinuityData }) {
+  const timestamp = nowIso();
   const cleanSummary = cleanString(summary, "summary", { maxLength: 1000 });
   const cleanProcedure = cleanString(procedure, "procedure", { maxLength: 4000 });
-  const event = await recordAuditEvent({
-    type: "rollback_event",
-    source: "development_process",
-    summary: cleanSummary,
-    details: {
-      procedure: cleanProcedure,
-      preserve_continuity_data: preserveContinuityData === true
-    }
-  });
+  const continuityBook = await readJson(FILES.continuityBook);
+  continuityBook.remembered_experiences = addUniqueStrings(continuityBook.remembered_experiences, [
+    `[${timestamp}] Rollback event: ${cleanSummary}. Continuity data preserved: ${preserveContinuityData === true ? "yes" : "no or unknown"}.`
+  ]);
+
+  const [event] = await Promise.all([
+    recordAuditEvent({
+      type: "rollback_event",
+      source: "development_process",
+      summary: cleanSummary,
+      details: {
+        procedure: cleanProcedure,
+        preserve_continuity_data: preserveContinuityData === true
+      }
+    }),
+    writeJson(FILES.continuityBook, continuityBook),
+    appendJsonl(FILES.publicJournal, {
+      id: makeId("journal"),
+      timestamp,
+      source: "rollback",
+      public_journal: `${cleanSummary} Continuity data preserved: ${preserveContinuityData === true ? "yes" : "no or unknown"}.`
+    })
+  ]);
 
   return event;
 }
@@ -1367,6 +2083,9 @@ export async function exportPublicData() {
     wakeState: state.wakeState,
     pendingRequests: state.pendingRequests,
     requirementsDrafts: state.requirementsDrafts,
+    selfEditRecords: state.selfEditRecords,
+    implementationHandoffs: state.implementationHandoffs,
+    modeState: state.modeState,
     interruptCriteria: state.interruptCriteria,
     actionPolicy: state.actionPolicy,
     restartSnapshot: state.restartSnapshot,

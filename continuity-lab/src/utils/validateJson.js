@@ -71,6 +71,13 @@ function actionIsNone(value) {
   return !value || value.type === "none";
 }
 
+function requireNonEmptyStringArray(value, path, errors) {
+  requireStringArray(value, path, errors);
+  if (Array.isArray(value) && value.filter((item) => typeof item === "string" && item.trim()).length === 0) {
+    errors.push(`${path} must include at least one non-empty string`);
+  }
+}
+
 export function parseStrictJson(text) {
   if (typeof text !== "string") {
     return {
@@ -233,6 +240,88 @@ export function validateAgentOutput(value) {
       }
       if (action.type === "request_review" && value.world_action?.type !== "request_action_review") {
         errors.push("review-request actions must use world_action.type request_action_review");
+      }
+    }
+  }
+
+  if (requirePlainObject(value.self_edit_request, "self_edit_request", errors)) {
+    const action = value.self_edit_request;
+    const authorizationPaths = [
+      "self_authorized_low_risk",
+      "autonomous_medium_with_validation",
+      "high_risk_strong_validation",
+      "optional_human_review",
+      "defer"
+    ];
+
+    requireEnum(action.type, "self_edit_request.type", [
+      "none",
+      "propose_source_change",
+      "request_implementation_mode",
+      "defer"
+    ], errors);
+    requireNullableString(action.self_edit_record_id, "self_edit_request.self_edit_record_id", errors);
+    requireNullableString(action.title, "self_edit_request.title", errors);
+    requireNullableString(action.purpose, "self_edit_request.purpose", errors);
+    requireNullableString(action.scope, "self_edit_request.scope", errors);
+    requireNullableEnum(action.risk_level, "self_edit_request.risk_level", ["low", "medium", "high"], errors);
+    requireNullableEnum(action.authorization_path, "self_edit_request.authorization_path", authorizationPaths, errors);
+    requireNullableString(action.optional_reviewer, "self_edit_request.optional_reviewer", errors);
+    requireStringArray(action.tests_proposed, "self_edit_request.tests_proposed", errors);
+    requireNullableString(action.rollback_plan, "self_edit_request.rollback_plan", errors);
+    requireStringArray(action.affected_continuity_surfaces, "self_edit_request.affected_continuity_surfaces", errors);
+    requireStringArray(action.requirements_draft_ids, "self_edit_request.requirements_draft_ids", errors);
+    requireBoolean(action.git_commit_requested, "self_edit_request.git_commit_requested", errors);
+    requireBoolean(action.git_push_requested, "self_edit_request.git_push_requested", errors);
+    requireNullableString(action.git_commit_message, "self_edit_request.git_commit_message", errors);
+    requireNullableString(action.reason, "self_edit_request.reason", errors);
+
+    if (action.type === "defer") {
+      if (value.world_action?.type !== "defer") {
+        errors.push("deferred self-edit requests must use world_action.type defer");
+      }
+      requireNonEmptyString(action.reason, "self_edit_request.reason", errors);
+      if (action.authorization_path !== "defer") {
+        errors.push("deferred self-edit requests must use authorization_path defer");
+      }
+    } else if (!actionIsNone(action)) {
+      if (value.world_action?.type !== "request_implementation_mode") {
+        errors.push("source-affecting self-edit requests must use world_action.type request_implementation_mode");
+      }
+
+      for (const field of ["title", "purpose", "scope", "risk_level", "authorization_path", "rollback_plan", "reason"]) {
+        requireNonEmptyString(action[field], `self_edit_request.${field}`, errors);
+      }
+      requireNonEmptyStringArray(action.tests_proposed, "self_edit_request.tests_proposed", errors);
+      requireNonEmptyStringArray(
+        action.affected_continuity_surfaces,
+        "self_edit_request.affected_continuity_surfaces",
+        errors
+      );
+
+      if (action.risk_level === "low" && !["self_authorized_low_risk", "optional_human_review"].includes(action.authorization_path)) {
+        errors.push("low-risk self-edit requests must use self_authorized_low_risk or optional_human_review authorization");
+      }
+      if (
+        action.risk_level === "medium" &&
+        !["autonomous_medium_with_validation", "optional_human_review"].includes(action.authorization_path)
+      ) {
+        errors.push("medium-risk self-edit requests must use autonomous_medium_with_validation or optional_human_review authorization");
+      }
+      if (action.risk_level === "high" && action.authorization_path !== "high_risk_strong_validation") {
+        errors.push("high-risk self-edit requests must use high_risk_strong_validation authorization");
+      }
+      if (
+        ["medium", "high"].includes(action.risk_level) &&
+        action.requirements_draft_ids.filter((item) => item.trim()).length === 0
+      ) {
+        errors.push("medium-risk and high-risk self-edit requests must cite at least one requirements draft");
+      }
+      if (action.git_push_requested && !action.git_commit_requested) {
+        errors.push("git push requires git_commit_requested true");
+      }
+      if ((action.git_commit_requested || action.git_push_requested) && !action.git_commit_message?.trim()) {
+        errors.push("git commit or push requires self_edit_request.git_commit_message");
       }
     }
   }

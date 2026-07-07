@@ -64,6 +64,24 @@ function baseOutput(overrides = {}) {
       rollback_plan: null,
       affected_continuity_surfaces: []
     },
+    self_edit_request: {
+      type: "none",
+      self_edit_record_id: null,
+      title: null,
+      purpose: null,
+      scope: null,
+      risk_level: null,
+      authorization_path: null,
+      optional_reviewer: null,
+      tests_proposed: [],
+      rollback_plan: null,
+      affected_continuity_surfaces: [],
+      requirements_draft_ids: [],
+      git_commit_requested: false,
+      git_push_requested: false,
+      git_commit_message: null,
+      reason: null
+    },
     interrupt_policy_action: {
       type: "none",
       criterion_id: null,
@@ -236,12 +254,41 @@ async function main() {
       world_action: {
         type: "change_wake_interval",
         target: "5 seconds",
-        reason: "Validation checks wake interval request preservation."
+        reason: "Validation checks autonomous wake interval changes."
       },
       requested_wake_interval_seconds: 5
     })
   );
   await applySuccessfulCycle({ mode: "validation", output: wakeOutput });
+
+  const selfEditOutput = await validateOutput(
+    baseOutput({
+      world_action: {
+        type: "request_implementation_mode",
+        target: "validation self-edit",
+        reason: "Validation records an autonomous implementation request without executing source changes."
+      },
+      self_edit_request: {
+        type: "request_implementation_mode",
+        self_edit_record_id: null,
+        title: "Validation self-edit request",
+        purpose: "Prove self-edit records preserve implementation authority metadata.",
+        scope: "Record metadata only during validation.",
+        risk_level: "medium",
+        authorization_path: "autonomous_medium_with_validation",
+        optional_reviewer: null,
+        tests_proposed: ["Run continuity validation script."],
+        rollback_plan: "Restore code snapshot if validation fails.",
+        affected_continuity_surfaces: ["selfEditRecords", "modeState", "auditLog"],
+        requirements_draft_ids: [draftId],
+        git_commit_requested: true,
+        git_push_requested: false,
+        git_commit_message: "Validate self-edit metadata",
+        reason: "Implementation authority should be recorded without default human approval."
+      }
+    })
+  );
+  await applySuccessfulCycle({ mode: "validation", output: selfEditOutput });
 
   state = await getPublicState();
   assert(state.requirementsDrafts.length === 1, "draft should persist");
@@ -252,13 +299,21 @@ async function main() {
   assert(state.interruptCriteria.length === 1, "interrupt criterion should persist");
   assert(state.interruptCriteria[0].enabled === false, "interrupt criterion should be disabled by default");
   assert(state.pendingRequests.some((request) => request.type === "human_question"), "pending requests should persist");
-  assert(state.pendingRequests.some((request) => request.type === "wake_interval_change"), "wake interval request should persist");
+  assert(state.wakeState.wake_interval_seconds === 5, "agent wake interval should apply immediately");
+  assert(state.wakeState.wake_interval_source === "agent", "agent wake interval source should persist");
+  assert(!state.pendingRequests.some((request) => request.type === "wake_interval_change" && request.status === "pending"), "valid agent wake interval should not require human approval");
+  assert(state.selfEditRecords.length === 1, "self-edit request should persist");
+  assert(state.selfEditRecords[0].authorization_path === "autonomous_medium_with_validation", "self-edit authorization path should persist");
+  assert(state.selfEditRecords[0].requirements_draft_ids.includes(draftId), "self-edit request should cite requirements draft");
+  assert(state.selfEditRecords[0].git_commit_requested === true, "git commit intent should persist");
   assert(state.publicJournal.some((entry) => entry.refusal?.did_refuse), "refusal should be recorded");
   assert(!Object.prototype.hasOwnProperty.call(state.privateMemory, "reflection"), "private reflections must not be public");
   assert(state.auditLog.recent.some((entry) => entry.type === "draft_creation"), "draft creation should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "draft_update"), "draft update should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "review_decision"), "review decision should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "self_authorized_action"), "self-authorized action should be audited");
+  assert(state.auditLog.recent.some((entry) => entry.type === "self_edit_record"), "self-edit record should be audited");
+  assert(state.auditLog.recent.some((entry) => entry.type === "wake_interval_changed"), "agent wake interval change should be audited");
 
   const snapshot = await prepareRestartContinuity("validation restart");
   assert(snapshot.privateMemory.count === state.privateMemory.count, "restart snapshot should include private metadata only");

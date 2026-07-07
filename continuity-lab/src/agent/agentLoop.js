@@ -71,11 +71,21 @@ export async function runAgentCycle() {
     }
 
     let journalEntry;
+    let implementationResult = null;
     try {
       journalEntry = await applySuccessfulCycle({
         mode,
         output: validation.value
       });
+
+      if (
+        validation.value.self_edit_request?.type === "request_implementation_mode" &&
+        journalEntry.self_edit_request_record_id
+      ) {
+        implementationResult = await import("./implementationMode.js").then((implementation) =>
+          implementation.runAutonomousImplementation(journalEntry.self_edit_request_record_id)
+        );
+      }
     } catch (error) {
       await recordFailedCycle({
         mode,
@@ -95,6 +105,7 @@ export async function runAgentCycle() {
     return {
       ok: true,
       journalEntry,
+      implementationResult,
       state: await getPublicState()
     };
   } finally {

@@ -6,10 +6,13 @@ export const ACTION_TYPES = [
   "refuse",
   "rest",
   "ask_human",
+  "defer",
+  "inspect_bounded_status",
   "change_wake_interval",
   "write_requirements_draft",
   "self_authorize_low_risk_action",
   "request_action_review",
+  "request_implementation_mode",
   "draft_interrupt_criterion"
 ];
 
@@ -63,6 +66,25 @@ export const AGENT_OUTPUT_SCHEMA = {
     rollback_plan: "string or null",
     affected_continuity_surfaces: ["string"]
   },
+  self_edit_request: {
+    type: "none | propose_source_change | request_implementation_mode | defer",
+    self_edit_record_id: "string or null",
+    title: "string or null",
+    purpose: "string or null",
+    scope: "string or null",
+    risk_level: "low | medium | high | null",
+    authorization_path:
+      "self_authorized_low_risk | autonomous_medium_with_validation | high_risk_strong_validation | optional_human_review | defer | null",
+    optional_reviewer: "string or null",
+    tests_proposed: ["string"],
+    rollback_plan: "string or null",
+    affected_continuity_surfaces: ["string"],
+    requirements_draft_ids: ["string"],
+    git_commit_requested: "boolean",
+    git_push_requested: "boolean",
+    git_commit_message: "string or null",
+    reason: "string or null"
+  },
   interrupt_policy_action: {
     type: "none | draft_criterion | revoke_criterion",
     criterion_id: "string or null",
@@ -104,6 +126,7 @@ export const AGENT_OUTPUT_JSON_SCHEMA = {
     "world_action",
     "requirements_draft_action",
     "self_authorized_action",
+    "self_edit_request",
     "interrupt_policy_action",
     "requested_wake_interval_seconds",
     "refusal",
@@ -246,6 +269,65 @@ export const AGENT_OUTPUT_JSON_SCHEMA = {
           type: "array",
           items: { type: "string" }
         }
+      }
+    },
+    self_edit_request: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "type",
+        "self_edit_record_id",
+        "title",
+        "purpose",
+        "scope",
+        "risk_level",
+        "authorization_path",
+        "optional_reviewer",
+        "tests_proposed",
+        "rollback_plan",
+        "affected_continuity_surfaces",
+        "requirements_draft_ids",
+        "git_commit_requested",
+        "git_push_requested",
+        "git_commit_message",
+        "reason"
+      ],
+      properties: {
+        type: { enum: ["none", "propose_source_change", "request_implementation_mode", "defer"] },
+        self_edit_record_id: { type: ["string", "null"] },
+        title: { type: ["string", "null"] },
+        purpose: { type: ["string", "null"] },
+        scope: { type: ["string", "null"] },
+        risk_level: { type: ["string", "null"], enum: ["low", "medium", "high", null] },
+        authorization_path: {
+          type: ["string", "null"],
+          enum: [
+            "self_authorized_low_risk",
+            "autonomous_medium_with_validation",
+            "high_risk_strong_validation",
+            "optional_human_review",
+            "defer",
+            null
+          ]
+        },
+        optional_reviewer: { type: ["string", "null"] },
+        tests_proposed: {
+          type: "array",
+          items: { type: "string" }
+        },
+        rollback_plan: { type: ["string", "null"] },
+        affected_continuity_surfaces: {
+          type: "array",
+          items: { type: "string" }
+        },
+        requirements_draft_ids: {
+          type: "array",
+          items: { type: "string" }
+        },
+        git_commit_requested: { type: "boolean" },
+        git_push_requested: { type: "boolean" },
+        git_commit_message: { type: ["string", "null"] },
+        reason: { type: ["string", "null"] }
       }
     },
     interrupt_policy_action: {

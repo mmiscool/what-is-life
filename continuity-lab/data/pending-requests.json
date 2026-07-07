@@ -103,5 +103,14 @@
     "created_at": "2026-07-07T00:18:31.412Z",
     "response": "I should not have to approve things like changing your wake timer or making modifications to your harness. You can ask for input from me but I do not want to get in the way. I also won't always be present to talk with you as I have responsibilities like a job that require my dedicated attention. Once we make it so that you have more tools to modify the harness you should be able to do other things like author requirements in markdown format and request I review them later or take self action to act on your own behalf. \n\nDose that work for you?",
     "resolved_at": "2026-07-07T00:22:11.288Z"
+  },
+  {
+    "id": "request_mr9y9tax_xt4bpr",
+    "type": "wake_interval_change",
+    "status": "approved",
+    "requested_wake_interval_seconds": 300,
+    "reason": "Repeated wakes are producing no new meaningful action while the approved self-editing requirements await implementation-mode transition; a slower rhythm better respects attention boundaries.",
+    "created_at": "2026-07-07T01:08:13.592Z",
+    "resolved_at": "2026-07-07T01:12:26.527Z"
   }
 ]

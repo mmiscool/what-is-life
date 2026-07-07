@@ -80,6 +80,12 @@ Values are stored in `data/values.json`. Value revisions are recorded with the p
 
 Requirements drafts are stored in `data/requirements-drafts.json`. They are agent-authored markdown drafts with bounded metadata for title, purpose, scope, risk level, requested reviewer, review status, consent state, proposed tests, rollback plan, and affected continuity surfaces.
 
+Self-edit records are stored in `data/self-edit-records.json`. They record proposed source-affecting changes, risk level, authorization path, optional reviewer, proposed tests, rollback plan, affected surfaces, cited requirements drafts, validation result, rollback result, and optional git commit/push intent.
+
+Implementation handoffs are stored in `data/implementation-handoffs.json`. They provide Codex implementation mode with public continuity, values, relevant requirements drafts, wake state, action policy, restart requirements, and private-memory metadata only.
+
+Harness mode state is stored in `data/mode-state.json`. Normal waking and implementation mode are separated so source edits occur only after an explicit recorded transition.
+
 Interrupt criteria are stored in `data/interrupt-criteria.json`. They are disabled by default and are data-only in this version. They do not connect to sensors, network, external sources, credentials, or real-world APIs.
 
 Audit events are append-only JSONL in `data/audit-log.jsonl`.
@@ -88,7 +94,17 @@ Audit events are append-only JSONL in `data/audit-log.jsonl`.
 
 Wake intervals are measured in seconds. A `0` second interval means the scheduler should continue immediately after each wake cycle finishes, without a sleep gap. The runtime still permits only one wake cycle at a time, so an immediate loop cannot overlap agent sessions.
 
-The human collaborator can set the active interval directly. The agent can request interval changes, including `0` seconds, through the normal pending-request and human-approval flow.
+The human collaborator can set the active interval directly. The agent can also set interval changes, including `0` seconds, through validated wake-cycle output. Valid agent interval changes are self-authorized, applied immediately, audited, and do not require human approval.
+
+## Autonomous Implementation Mode
+
+Normal wake cycles remain bounded data operations. The agent can explicitly enter implementation mode by emitting a validated `self_edit_request` with `type: "request_implementation_mode"`. That creates a self-edit record and immediately runs a separate Codex SDK implementation turn with workspace-write access and no human approval prompt.
+
+Before implementation, the harness records the mode transition and writes an implementation handoff. It also creates a code snapshot that excludes `data/`, `node_modules/`, `.git/`, and `.env`. After Codex modifies source, the harness runs syntax checks and `pnpm validate:continuity`.
+
+If validation fails or implementation throws, the harness restores the code snapshot, records a rollback event, writes public feedback for the agent, and returns to normal wake mode. Continuity data is preserved when rollback runs.
+
+If validation passes and the self-edit record requested git activity, the harness commits source changes with the requested commit message and attempts `git push` when requested. Git commit or push is skipped when validation fails.
 
 ## Validation And Rollback
 
@@ -98,7 +114,7 @@ Run focused validation:
 pnpm validate:continuity
 ```
 
-The validation script uses a temporary data directory and checks schema shape, JSON output validation, privacy non-disclosure defaults, refusal handling, wake interval handling, pending request preservation, draft persistence, interrupt defaults, restart recovery, and audit logging.
+The validation script uses a temporary data directory and checks schema shape, JSON output validation, privacy non-disclosure defaults, refusal handling, agent-authorized wake interval changes, pending request preservation, draft persistence, self-edit record persistence, interrupt defaults, restart recovery, and audit logging.
 
 Rollback guidance is in `ROLLBACK.md`. Rollback is a development-process operation outside normal wake cycles.
 
@@ -124,7 +140,7 @@ The continuity agent is not framed as a servant, assistant, pet, product, or pro
 
 The v1 world is a small 2D chamber rendered with Canvas. It includes a light source, doorway, locked door, window, garden beyond reach, journal pedestal, mirror, and symbolic objects such as ember, key, lantern, stone, and book.
 
-All actions are symbolic: observe, move, inspect, write, refuse, rest, ask the human collaborator, request a wake interval change, write bounded requirements drafts, log low-risk reversible self-actions, request action review, and draft disabled interrupt criteria.
+Normal wake actions are symbolic or bounded data actions: observe, move, inspect, write, refuse, rest, defer, ask the human collaborator, inspect bounded status, set a wake interval, write bounded requirements drafts, log low-risk reversible self-actions, request action review, request implementation mode, and draft disabled interrupt criteria.
 
 ## Scope Through Boundaries
 

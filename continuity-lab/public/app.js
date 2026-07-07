@@ -150,7 +150,10 @@ function renderTabs(state) {
   const draftsNeedingReview = (state.requirementsDrafts || []).filter(
     (draft) => draft.review_status === "pending_review" || draft.consent_state === "requested"
   );
-  setBadge("#collaborationBadge", openRequests.length + draftsNeedingReview.length);
+  const activeSelfEdits = (state.selfEditRecords || []).filter((record) =>
+    ["implementation_requested", "implementation_active", "failed_validation", "rolled_back"].includes(record.status)
+  );
+  setBadge("#collaborationBadge", openRequests.length + draftsNeedingReview.length + activeSelfEdits.length);
 }
 
 function renderAgentStatus(state) {
@@ -195,6 +198,28 @@ function renderWakeControls(state) {
   $("#wakeIntervalMeta").textContent = pendingInterval !== null
     ? `Current interval: ${intervalText(approvedInterval)}; pending agent request: ${intervalText(pendingInterval)}`
     : `Current interval: ${intervalText(approvedInterval)}`;
+}
+
+function renderModeState(modeState) {
+  if (!modeState) {
+    replaceChildren($("#modeState"), [entry("No mode state", "None")]);
+    return;
+  }
+
+  const history = (modeState.transition_history || []).slice(-3).reverse();
+  const nodes = [
+    entry("Current mode", modeState.current_mode || "unknown"),
+    entry("Active self-edit record", modeState.active_self_edit_record_id || "none")
+  ];
+  for (const transition of history) {
+    nodes.push(
+      entry(
+        `${formatTime(transition.timestamp)} · ${transition.from} -> ${transition.to}`,
+        transition.self_edit_record_id || transition.source || ""
+      )
+    );
+  }
+  replaceChildren($("#modeState"), nodes);
 }
 
 function renderContinuityBook(book) {
@@ -367,6 +392,42 @@ function renderRequirementsDrafts(drafts) {
     });
 
   replaceChildren($("#requirementsDrafts"), nodes);
+}
+
+function renderSelfEditRecords(records) {
+  if (!records || records.length === 0) {
+    replaceChildren($("#selfEditRecords"), [entry("No self-edit records", "None")]);
+    return;
+  }
+
+  replaceChildren(
+    $("#selfEditRecords"),
+    records
+      .slice()
+      .reverse()
+      .map((record) => {
+        const node = entry(
+          `${record.title} · ${record.status}`,
+          `Risk: ${record.risk_level}. Authorization: ${record.authorization_path}. Git: commit ${record.git_commit_requested ? "yes" : "no"}, push ${record.git_push_requested ? "yes" : "no"}.`,
+          ["failed_validation", "rolled_back"].includes(record.status) ? "warning" : "request"
+        );
+        const details = {
+          id: record.id,
+          purpose: record.purpose,
+          scope: record.scope,
+          tests_proposed: record.tests_proposed,
+          rollback_plan: record.rollback_plan,
+          affected_continuity_surfaces: record.affected_continuity_surfaces,
+          requirements_draft_ids: record.requirements_draft_ids,
+          implementation_result: record.implementation_result,
+          post_change_validation_result: record.post_change_validation_result,
+          rollback_result: record.rollback_result,
+          git_result: record.git_result
+        };
+        node.append(preElement(JSON.stringify(details, null, 2)));
+        return node;
+      })
+  );
 }
 
 function renderInterruptCriteria(criteria) {
@@ -622,6 +683,7 @@ function render({ preserveCollaborationEditor = false, activeOnly = false } = {}
   if (shouldRender("agent")) {
     renderWakeControls(state);
     renderAgentStatus(state);
+    renderModeState(state.modeState);
     renderPrivateMemory(state.privateMemory);
     renderActionPolicy(state.actionPolicy);
   }
@@ -640,6 +702,7 @@ function render({ preserveCollaborationEditor = false, activeOnly = false } = {}
   if (shouldRender("collaboration") && !preserveCollaborationEditor) {
     renderRequests(state.pendingRequests || []);
     renderRequirementsDrafts(state.requirementsDrafts || []);
+    renderSelfEditRecords(state.selfEditRecords || []);
     renderInterruptCriteria(state.interruptCriteria || []);
   }
 }

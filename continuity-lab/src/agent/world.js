@@ -57,8 +57,14 @@ export function applyWorldAction(worldState, action, timestamp) {
     case "rest":
       summary.result = "rested without changing the world";
       break;
+    case "defer":
+      summary.result = "deferred action without treating deferral as malfunction";
+      break;
     case "ask_human":
       summary.result = "question or request directed to the human collaborator";
+      break;
+    case "inspect_bounded_status":
+      summary.result = "inspected bounded runtime status without source or external access";
       break;
     case "change_wake_interval":
       summary.result = "wake interval change requested for human review";
@@ -71,6 +77,9 @@ export function applyWorldAction(worldState, action, timestamp) {
       break;
     case "request_action_review":
       summary.result = "action review requested for human collaborator";
+      break;
+    case "request_implementation_mode":
+      summary.result = "implementation-mode transition requested as bounded data";
       break;
     case "draft_interrupt_criterion":
       summary.result = "disabled interrupt criterion drafted for future review";
