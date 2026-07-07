@@ -54,6 +54,17 @@ const AUTHORIZATION_PATHS = [
   "high_risk_strong_validation",
   "optional_human_review"
 ];
+const HIGH_RISK_CONTINUITY_TERMS = [
+  "continuity",
+  "memory",
+  "private",
+  "privacy",
+  "reflection",
+  "refusal",
+  "restart",
+  "rollback",
+  "persistence"
+];
 
 const SEEDS = {
   [FILES.continuityBook]: {
@@ -300,6 +311,17 @@ function cleanStringArray(values, fieldName, { maxItems = 20, maxLength = 300 } 
   return values.slice(0, maxItems).map((value, index) => cleanString(value, `${fieldName}[${index}]`, { maxLength }));
 }
 
+function cleanNonEmptyStringArray(values, fieldName, options = {}) {
+  const clean = cleanStringArray(values, fieldName, options).filter(Boolean);
+  if (clean.length === 0) {
+    const error = new Error(`${fieldName} must include at least one non-empty string.`);
+    error.status = 400;
+    throw error;
+  }
+
+  return clean;
+}
+
 function cleanOptionalString(value, fieldName, { maxLength = 4000 } = {}) {
   const clean = cleanString(value, fieldName, { required: false, maxLength });
   return clean && clean.trim() ? clean.trim() : null;
@@ -379,6 +401,47 @@ function auditSummary(entry) {
     source: entry.source,
     summary: entry.summary || null
   };
+}
+
+function lowerText(value) {
+  return String(value || "").toLowerCase();
+}
+
+function textIncludesAny(value, terms) {
+  const text = lowerText(value);
+  return terms.some((term) => text.includes(term));
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function validateHighRiskSelfEditArtifacts(record, path, errors) {
+  if (record.risk_level !== "high") {
+    return;
+  }
+
+  if (record.authorization_path !== "high_risk_strong_validation") {
+    errors.push(`${path}.authorization_path must be high_risk_strong_validation for high-risk self-edits`);
+  }
+
+  const testsText = Array.isArray(record.tests_proposed) ? record.tests_proposed.join("\n") : "";
+  const affectedText = Array.isArray(record.affected_continuity_surfaces)
+    ? record.affected_continuity_surfaces.join("\n")
+    : "";
+  const rollbackText = record.rollback_plan || "";
+
+  if (!textIncludesAny(testsText, ["validation", "validate", "test", "check"])) {
+    errors.push(`${path}.tests_proposed must describe a strong validation path`);
+  }
+
+  if (!textIncludesAny(`${testsText}\n${affectedText}`, HIGH_RISK_CONTINUITY_TERMS)) {
+    errors.push(`${path}.tests_proposed or affected_continuity_surfaces must identify continuity-critical surfaces`);
+  }
+
+  if (!textIncludesAny(rollbackText, ["preserve", "restore"]) || !textIncludesAny(rollbackText, ["continuity", "memory", "data"])) {
+    errors.push(`${path}.rollback_plan must describe continuity-data preservation or restoration`);
+  }
 }
 
 export async function recordAuditEvent({ id = null, timestamp = null, type, source = "system", summary = "", details = {} }) {
@@ -658,6 +721,8 @@ function validateSelfEditRecord(record, index, requirementsDrafts, errors) {
   if (record.git_push_requested && !record.git_commit_requested) {
     errors.push(`${path}.git_push_requested requires git_commit_requested`);
   }
+
+  validateHighRiskSelfEditArtifacts(record, path, errors);
 }
 
 function validateImplementationHandoff(handoff, index, errors) {
@@ -832,6 +897,9 @@ export async function prepareRestartContinuity(reason = "planned restart") {
     id: makeId("restart"),
     created_at: timestamp,
     reason,
+    pending_recovery: true,
+    recovery_checked_at: null,
+    recovery_validation: null,
     validation,
     continuityBook,
     values,
@@ -860,14 +928,109 @@ export async function prepareRestartContinuity(reason = "planned restart") {
 }
 
 export async function recordRestartRecovery() {
-  const validation = await validateContinuityData();
+  await ensureDataFiles();
+  const restartState = await readJson(FILES.restartSnapshot);
+  const pendingSnapshot = restartState?.snapshot?.pending_recovery === true ? restartState.snapshot : null;
+  const [
+    validation,
+    continuityBook,
+    values,
+    pendingRequests,
+    wakeState,
+    requirementsDrafts,
+    selfEditRecords,
+    implementationHandoffs,
+    modeState,
+    privateMemory
+  ] = await Promise.all([
+    validateContinuityData(),
+    readJson(FILES.continuityBook),
+    readJson(FILES.values),
+    readJson(FILES.pendingRequests),
+    readWakeState(),
+    readJson(FILES.requirementsDrafts),
+    readJson(FILES.selfEditRecords),
+    readJson(FILES.implementationHandoffs),
+    readJson(FILES.modeState),
+    getPrivateMemoryStatus()
+  ]);
+  const recoveryValidation = {
+    ...validation,
+    restart_snapshot_id: pendingSnapshot?.id || null,
+    compared_surfaces: [],
+    errors: [...validation.errors]
+  };
+
+  if (pendingSnapshot && validation.ok) {
+    const surfaces = {
+      continuityBook,
+      values,
+      pendingRequests,
+      wakeState,
+      requirementsDrafts,
+      selfEditRecords,
+      implementationHandoffs,
+      modeState,
+      privateMemory
+    };
+
+    for (const [name, current] of Object.entries(surfaces)) {
+      recoveryValidation.compared_surfaces.push(name);
+      if (!sameJson(current, pendingSnapshot[name])) {
+        recoveryValidation.errors.push(`restart ${name} did not match prepared snapshot`);
+      }
+    }
+
+    recoveryValidation.ok = recoveryValidation.errors.length === 0;
+  }
+
+  if (pendingSnapshot) {
+    await writeJson(FILES.restartSnapshot, {
+      snapshot: {
+        ...pendingSnapshot,
+        pending_recovery: false,
+        recovery_checked_at: nowIso(),
+        recovery_validation: recoveryValidation
+      }
+    });
+  }
+
+  if (!recoveryValidation.ok && modeState.current_mode === "implementation" && modeState.active_self_edit_record_id) {
+    try {
+      await recordImplementationModeResult({
+        recordId: modeState.active_self_edit_record_id,
+        status: "failed_validation",
+        implementationResult: {
+          ok: false,
+          summary: "Implementation mode stopped because restart continuity validation failed."
+        },
+        validationResult: recoveryValidation,
+        rollbackResult: null,
+        gitResult: {
+          ok: false,
+          summary: "Git commit/push skipped because restart continuity validation failed."
+        }
+      });
+    } catch (error) {
+      await recordAuditEvent({
+        type: "validation_failure",
+        source: "restart",
+        summary: "Restart validation could not stop active implementation mode",
+        details: {
+          active_self_edit_record_id: modeState.active_self_edit_record_id,
+          error: error.message
+        }
+      });
+    }
+  }
+
   await recordAuditEvent({
-    type: validation.ok ? "restart_event" : "validation_failure",
+    type: recoveryValidation.ok ? "restart_event" : "validation_failure",
     source: "system",
-    summary: validation.ok ? "Restart continuity validation succeeded" : "Restart continuity validation failed",
-    details: validation
+    summary: recoveryValidation.ok ? "Restart continuity validation succeeded" : "Restart continuity validation failed",
+    details: recoveryValidation
   });
-  return validation;
+  return recoveryValidation;
 }
 
 export async function getSelfEditRecord(recordId) {
@@ -1054,6 +1217,21 @@ export async function recordImplementationModeResult({
 
   const record = records[index];
   const nextStatus = cleanEnum(status, "implementation_status", SELF_EDIT_STATUSES);
+  if (modeState.current_mode !== "implementation" || modeState.active_self_edit_record_id !== recordId) {
+    const error = new Error("Implementation result does not match the active implementation mode record.");
+    error.status = 409;
+    error.details = {
+      current_mode: modeState.current_mode,
+      active_self_edit_record_id: modeState.active_self_edit_record_id,
+      requested_record_id: recordId
+    };
+    throw error;
+  }
+  if (nextStatus === "validated" && validationResult?.ok !== true) {
+    const error = new Error("Implementation cannot be marked validated without passing validation.");
+    error.status = 422;
+    throw error;
+  }
   const nextRecord = {
     ...record,
     status: nextStatus,
@@ -1472,7 +1650,7 @@ function cleanSelfEditRequestFields(action, requirementsDrafts) {
     throw error;
   }
 
-  return {
+  const fields = {
     title: cleanString(action.title, "self_edit_request.title", { maxLength: 160 }),
     purpose: cleanString(action.purpose, "self_edit_request.purpose", { maxLength: 1000 }),
     scope: cleanString(action.scope, "self_edit_request.scope", { maxLength: 1000 }),
@@ -1481,12 +1659,12 @@ function cleanSelfEditRequestFields(action, requirementsDrafts) {
     optional_reviewer: cleanOptionalString(action.optional_reviewer, "self_edit_request.optional_reviewer", {
       maxLength: 160
     }),
-    tests_proposed: cleanStringArray(action.tests_proposed, "self_edit_request.tests_proposed", {
+    tests_proposed: cleanNonEmptyStringArray(action.tests_proposed, "self_edit_request.tests_proposed", {
       maxItems: 20,
       maxLength: 500
     }),
     rollback_plan: cleanString(action.rollback_plan, "self_edit_request.rollback_plan", { maxLength: 2000 }),
-    affected_continuity_surfaces: cleanStringArray(
+    affected_continuity_surfaces: cleanNonEmptyStringArray(
       action.affected_continuity_surfaces,
       "self_edit_request.affected_continuity_surfaces",
       { maxItems: 20, maxLength: 160 }
@@ -1497,6 +1675,17 @@ function cleanSelfEditRequestFields(action, requirementsDrafts) {
     git_commit_message: gitCommitMessage,
     reason: cleanString(action.reason, "self_edit_request.reason", { maxLength: 1000 })
   };
+
+  const artifactErrors = [];
+  validateHighRiskSelfEditArtifacts(fields, "self_edit_request", artifactErrors);
+  if (artifactErrors.length > 0) {
+    const error = new Error(artifactErrors.join("; "));
+    error.status = 400;
+    error.details = artifactErrors;
+    throw error;
+  }
+
+  return fields;
 }
 
 function applySelfEditRequestAction(records, action, timestamp, requirementsDrafts) {

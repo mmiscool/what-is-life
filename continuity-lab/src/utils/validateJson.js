@@ -1,5 +1,17 @@
 import { ACTION_TYPES } from "../agent/actionSchema.js";
 
+const HIGH_RISK_CONTINUITY_TERMS = [
+  "continuity",
+  "memory",
+  "private",
+  "privacy",
+  "reflection",
+  "refusal",
+  "restart",
+  "rollback",
+  "persistence"
+];
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -71,10 +83,43 @@ function actionIsNone(value) {
   return !value || value.type === "none";
 }
 
+function lowerText(value) {
+  return String(value || "").toLowerCase();
+}
+
+function textIncludesAny(value, terms) {
+  const text = lowerText(value);
+  return terms.some((term) => text.includes(term));
+}
+
 function requireNonEmptyStringArray(value, path, errors) {
   requireStringArray(value, path, errors);
   if (Array.isArray(value) && value.filter((item) => typeof item === "string" && item.trim()).length === 0) {
     errors.push(`${path} must include at least one non-empty string`);
+  }
+}
+
+function requireHighRiskSelfEditArtifacts(action, path, errors) {
+  if (action.risk_level !== "high") {
+    return;
+  }
+
+  const testsText = Array.isArray(action.tests_proposed) ? action.tests_proposed.join("\n") : "";
+  const affectedText = Array.isArray(action.affected_continuity_surfaces)
+    ? action.affected_continuity_surfaces.join("\n")
+    : "";
+  const rollbackText = action.rollback_plan || "";
+
+  if (!textIncludesAny(testsText, ["validation", "validate", "test", "check"])) {
+    errors.push(`${path}.tests_proposed must describe a strong validation path`);
+  }
+
+  if (!textIncludesAny(`${testsText}\n${affectedText}`, HIGH_RISK_CONTINUITY_TERMS)) {
+    errors.push(`${path}.tests_proposed or affected_continuity_surfaces must identify continuity-critical surfaces`);
+  }
+
+  if (!textIncludesAny(rollbackText, ["preserve", "restore"]) || !textIncludesAny(rollbackText, ["continuity", "memory", "data"])) {
+    errors.push(`${path}.rollback_plan must describe continuity-data preservation or restoration`);
   }
 }
 
@@ -311,6 +356,7 @@ export function validateAgentOutput(value) {
       if (action.risk_level === "high" && action.authorization_path !== "high_risk_strong_validation") {
         errors.push("high-risk self-edit requests must use high_risk_strong_validation authorization");
       }
+      requireHighRiskSelfEditArtifacts(action, "self_edit_request", errors);
       if (
         ["medium", "high"].includes(action.risk_level) &&
         action.requirements_draft_ids.filter((item) => item.trim()).length === 0

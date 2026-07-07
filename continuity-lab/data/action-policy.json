@@ -1,4 +1,5 @@
 {
+  "policy_version": 2,
   "low_risk": {
     "authorization": "self_authorized_when_reversible",
     "allowed_actions": [
@@ -9,7 +10,7 @@
     "required_logging": true
   },
   "medium_risk": {
-    "authorization": "draft_for_human_review",
+    "authorization": "autonomous_with_requirements_draft_tests_rollback_and_validation",
     "examples": [
       "harness behavior changes",
       "environment configuration changes"
@@ -17,11 +18,13 @@
     "required_artifacts": [
       "requirements draft",
       "tests proposed",
-      "rollback plan"
+      "rollback plan",
+      "affected-surface list",
+      "passing validation"
     ]
   },
   "high_risk": {
-    "authorization": "explicit_plan_and_validation_before_implementation",
+    "authorization": "strong_validation_fail_closed_when_continuity_preservation_is_uncertain",
     "examples": [
       "memory",
       "privacy",
@@ -32,8 +35,17 @@
     ],
     "required_artifacts": [
       "explicit plan",
-      "validation path",
-      "human review"
+      "strong validation path",
+      "rollback certainty",
+      "continuity preservation proof"
+    ]
+  },
+  "human_review": {
+    "authorization": "optional_unless_safety_rule_requires_review",
+    "allowed_when": [
+      "agent requests feedback",
+      "collaborator offers review",
+      "unrecoverable continuity risk is identified"
     ]
   }
 }

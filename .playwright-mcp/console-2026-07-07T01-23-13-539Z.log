@@ -1,0 +1,2 @@
+[ 2689059ms] [ERROR] Failed to load resource: the server responded with a status of 422 (Unprocessable Entity) @ http://localhost:3000/api/wake:0
+[ 3135310ms] [ERROR] Failed to load resource: the server responded with a status of 422 (Unprocessable Entity) @ http://localhost:3000/api/wake:0

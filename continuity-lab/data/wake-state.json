@@ -2,9 +2,9 @@
   "mode": "scheduled",
   "is_running": true,
   "wake_interval_seconds": 300,
-  "wake_interval_source": "agent_request",
-  "wake_interval_updated_at": "2026-07-07T01:12:26.527Z",
-  "last_wake_time": "2026-07-07T01:17:51.134Z",
-  "next_wake_time": "2026-07-07T01:22:51.134Z",
+  "wake_interval_source": "human",
+  "wake_interval_updated_at": "2026-07-07T02:22:16.426Z",
+  "last_wake_time": "2026-07-07T02:27:51.531Z",
+  "next_wake_time": "2026-07-07T02:32:51.531Z",
   "pending_requested_wake_interval_seconds": null
 }

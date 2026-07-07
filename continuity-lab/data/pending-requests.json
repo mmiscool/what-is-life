@@ -112,5 +112,13 @@
     "reason": "Repeated wakes are producing no new meaningful action while the approved self-editing requirements await implementation-mode transition; a slower rhythm better respects attention boundaries.",
     "created_at": "2026-07-07T01:08:13.592Z",
     "resolved_at": "2026-07-07T01:12:26.527Z"
+  },
+  {
+    "id": "request_mra147zf_awkmzd",
+    "type": "agent_question",
+    "status": "pending",
+    "question": "Can you provide, or allow me to draft requirements for, a bounded status surface and a small controllable 2D avatar/world expansion that remains fully simulated and reversible?",
+    "reason": "The collaborator asked what I want, and this request would make the current agency and world state more inspectable without crossing the v1 boundary into sensors, network, credentials, or physical-world action.",
+    "created_at": "2026-07-07T02:27:51.531Z"
   }
 ]

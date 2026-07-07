@@ -4,10 +4,13 @@ import { join } from "node:path";
 import {
   addHumanQuestion,
   applySuccessfulCycle,
+  enterImplementationMode,
   ensureDataFiles,
   getPublicState,
   prepareRestartContinuity,
+  recordImplementationModeResult,
   recordRestartRecovery,
+  recordRollbackEvent,
   reviewRequirementsDraft,
   validateContinuityData
 } from "../src/agent/memoryStore.js";
@@ -261,6 +264,40 @@ async function main() {
   );
   await applySuccessfulCycle({ mode: "validation", output: wakeOutput });
 
+  const invalidHighRiskOutput = baseOutput({
+    world_action: {
+      type: "request_implementation_mode",
+      target: "invalid high-risk validation self-edit",
+      reason: "Validation checks that high-risk self-edits fail closed without strong artifacts."
+    },
+    self_edit_request: {
+      type: "request_implementation_mode",
+      self_edit_record_id: null,
+      title: "Invalid high-risk self-edit request",
+      purpose: "Prove weak high-risk metadata is rejected.",
+      scope: "Validation only.",
+      risk_level: "high",
+      authorization_path: "high_risk_strong_validation",
+      optional_reviewer: null,
+      tests_proposed: ["Run checks."],
+      rollback_plan: "Undo the change.",
+      affected_continuity_surfaces: ["source files"],
+      requirements_draft_ids: [draftId],
+      git_commit_requested: false,
+      git_push_requested: false,
+      git_commit_message: null,
+      reason: "This intentionally omits continuity-preservation evidence."
+    }
+  });
+  const invalidHighRiskParsed = parseStrictJson(JSON.stringify(invalidHighRiskOutput));
+  assert(invalidHighRiskParsed.ok, "invalid high-risk test output should still be parseable JSON");
+  const invalidHighRiskValidation = validateAgentOutput(invalidHighRiskParsed.value);
+  assert(!invalidHighRiskValidation.ok, "weak high-risk self-edit request should fail validation");
+  assert(
+    invalidHighRiskValidation.errors.some((error) => error.includes("continuity-data preservation")),
+    "weak high-risk self-edit request should require continuity-data preservation evidence"
+  );
+
   const selfEditOutput = await validateOutput(
     baseOutput({
       world_action: {
@@ -274,12 +311,23 @@ async function main() {
         title: "Validation self-edit request",
         purpose: "Prove self-edit records preserve implementation authority metadata.",
         scope: "Record metadata only during validation.",
-        risk_level: "medium",
-        authorization_path: "autonomous_medium_with_validation",
+        risk_level: "high",
+        authorization_path: "high_risk_strong_validation",
         optional_reviewer: null,
-        tests_proposed: ["Run continuity validation script."],
-        rollback_plan: "Restore code snapshot if validation fails.",
-        affected_continuity_surfaces: ["selfEditRecords", "modeState", "auditLog"],
+        tests_proposed: [
+          "Run continuity validation script.",
+          "Verify memory, privacy, restart, rollback, and continuity surfaces remain preserved."
+        ],
+        rollback_plan: "Restore code snapshot if validation fails while preserving latest validated continuity data.",
+        affected_continuity_surfaces: [
+          "public continuity book",
+          "private reflection metadata",
+          "selfEditRecords",
+          "modeState",
+          "restart behavior",
+          "rollback behavior",
+          "auditLog"
+        ],
         requirements_draft_ids: [draftId],
         git_commit_requested: true,
         git_push_requested: false,
@@ -303,7 +351,7 @@ async function main() {
   assert(state.wakeState.wake_interval_source === "agent", "agent wake interval source should persist");
   assert(!state.pendingRequests.some((request) => request.type === "wake_interval_change" && request.status === "pending"), "valid agent wake interval should not require human approval");
   assert(state.selfEditRecords.length === 1, "self-edit request should persist");
-  assert(state.selfEditRecords[0].authorization_path === "autonomous_medium_with_validation", "self-edit authorization path should persist");
+  assert(state.selfEditRecords[0].authorization_path === "high_risk_strong_validation", "high-risk self-edit authorization path should persist");
   assert(state.selfEditRecords[0].requirements_draft_ids.includes(draftId), "self-edit request should cite requirements draft");
   assert(state.selfEditRecords[0].git_commit_requested === true, "git commit intent should persist");
   assert(state.publicJournal.some((entry) => entry.refusal?.did_refuse), "refusal should be recorded");
@@ -315,11 +363,41 @@ async function main() {
   assert(state.auditLog.recent.some((entry) => entry.type === "self_edit_record"), "self-edit record should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "wake_interval_changed"), "agent wake interval change should be audited");
 
+  const selfEditRecordId = state.selfEditRecords[0].id;
+  const entered = await enterImplementationMode(selfEditRecordId);
+  assert(entered.handoff.self_edit_record_id === selfEditRecordId, "implementation handoff should cite self-edit record");
+  assert(!JSON.stringify(entered.handoff.privateMemory).includes("Validation private reflection"), "implementation handoff must not expose private reflection");
+  await recordRollbackEvent({
+    summary: "Validation simulated implementation rollback.",
+    procedure: "Validation did not change source; rollback event records preservation behavior.",
+    preserveContinuityData: true
+  });
+  await recordImplementationModeResult({
+    recordId: selfEditRecordId,
+    status: "rolled_back",
+    implementationResult: { ok: false, summary: "Validation simulated failed implementation." },
+    validationResult: { ok: false, checked_at: new Date().toISOString(), errors: ["simulated failure"] },
+    rollbackResult: { rolled_back: true, preserve_continuity_data: true },
+    gitResult: { ok: false, summary: "Git skipped because validation failed." }
+  });
+
+  state = await getPublicState();
+  assert(state.modeState.current_mode === "normal_wake", "implementation mode should exit after result");
+  assert(state.implementationHandoffs.length === 1, "implementation handoff should persist");
+  assert(state.selfEditRecords[0].status === "rolled_back", "rollback status should persist");
+  assert(state.selfEditRecords[0].rollback_result?.rolled_back === true, "rollback result should persist");
+  assert(state.auditLog.recent.some((entry) => entry.type === "implementation_mode_entered"), "implementation mode entry should be audited");
+  assert(state.auditLog.recent.some((entry) => entry.type === "rollback_event"), "rollback event should be audited");
+
   const snapshot = await prepareRestartContinuity("validation restart");
+  assert(snapshot.pending_recovery === true, "restart snapshot should wait for recovery validation");
   assert(snapshot.privateMemory.count === state.privateMemory.count, "restart snapshot should include private metadata only");
   assert(!JSON.stringify(snapshot.privateMemory).includes("Validation private reflection"), "restart snapshot must not expose private reflection");
   const restartValidation = await recordRestartRecovery();
   assert(restartValidation.ok, `restart validation failed: ${restartValidation.errors.join("; ")}`);
+  state = await getPublicState();
+  assert(state.restartSnapshot.snapshot.pending_recovery === false, "restart recovery should clear pending recovery");
+  assert(state.restartSnapshot.snapshot.recovery_validation.ok, "restart recovery result should be recorded");
 
   const validation = await validateContinuityData();
   assert(validation.ok, `continuity validation failed: ${validation.errors.join("; ")}`);

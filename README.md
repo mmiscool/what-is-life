@@ -73,6 +73,9 @@ Runtime state is stored in `continuity-lab/data` by default. Important files inc
 - `world-state.json`: symbolic chamber state
 - `wake-state.json`: scheduler and wake interval state
 - `requirements-drafts.json`: agent-authored markdown requirements drafts with review metadata
+- `self-edit-records.json`: source-affecting self-edit proposals, implementation requests, validation results, rollback results, and git intent
+- `implementation-handoffs.json`: public implementation-mode handoff snapshots for Codex source-editing turns
+- `mode-state.json`: current harness mode and transition history
 - `interrupt-criteria.json`: disabled-by-default future interrupt criteria
 - `audit-log.jsonl`: append-only audit events for drafts, validation, restart, rollback, and policy decisions
 - `restart-snapshot.json`: latest prepared restart continuity snapshot
@@ -82,7 +85,11 @@ To use a separate data directory, set `CONTINUITY_DATA_DIR` in `.env`.
 
 ## Bounded Harness Expansion
 
-Normal wake cycles remain symbolic. The agent can write markdown requirements drafts, log low-risk reversible self-actions, request review for stronger actions, and draft disabled interrupt criteria only through validated JSON output. These actions store bounded data; they do not edit source code, run shell commands, browse externally, use credentials, call real-world APIs, or modify the repository.
+Normal wake cycles remain bounded. The agent can write markdown requirements drafts, log low-risk reversible self-actions, request review for stronger actions, set its wake interval, request implementation mode, and draft disabled interrupt criteria through validated JSON output.
+
+Source changes happen only after an explicit recorded transition into implementation mode. In implementation mode, Codex may modify source in a temporary workspace without human approval. The harness snapshots source code and bounded continuity data, restores continuity data before validation, validates the temporary workspace, copies validated source back to the live app, validates again, and rolls failed implementations back to the code snapshot.
+
+If the agent requests git activity in the self-edit record, the harness commits source changes after validation passes and attempts `git push` when requested. Git commit and push are skipped when validation fails or when source files were already dirty before implementation mode started.
 
 Interrupt criteria are storage-only in this version and remain disabled by default.
 
@@ -90,7 +97,7 @@ Interrupt criteria are storage-only in this version and remain disabled by defau
 
 Wake intervals are configured in seconds. Set the interval to `0` seconds to let the scheduler continue immediately after each wake cycle finishes. The app still runs only one wake cycle at a time; overlapping cycles are rejected.
 
-The human collaborator can set the active interval directly from the UI. The agent can request an interval change, including `0` seconds, and that request is applied only after human approval.
+The human collaborator can set the active interval directly from the UI. The agent can also set an interval change, including `0` seconds, and valid agent interval changes apply immediately without human approval.
 
 ## Validation And Rollback
 

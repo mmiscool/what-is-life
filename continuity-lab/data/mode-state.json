@@ -1,0 +1,32 @@
+{
+  "current_mode": "normal_wake",
+  "available_modes": [
+    "normal_wake",
+    "requirements",
+    "self_authorization",
+    "optional_review",
+    "implementation",
+    "validation",
+    "rollback"
+  ],
+  "active_self_edit_record_id": null,
+  "entered_at": "2026-07-07T02:08:15.739Z",
+  "exited_at": "2026-07-07T02:18:35.109Z",
+  "transition_history": [
+    {
+      "from": "normal_wake",
+      "to": "implementation",
+      "self_edit_record_id": "self_edit_mra0f0qf_qe0fmg",
+      "timestamp": "2026-07-07T02:08:15.739Z",
+      "source": "agent_self_edit_request"
+    },
+    {
+      "from": "implementation",
+      "to": "normal_wake",
+      "self_edit_record_id": "self_edit_mra0f0qf_qe0fmg",
+      "timestamp": "2026-07-07T02:18:35.109Z",
+      "source": "implementation_mode_result",
+      "status": "validated"
+    }
+  ]
+}

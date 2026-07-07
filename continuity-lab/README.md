@@ -98,13 +98,13 @@ The human collaborator can set the active interval directly. The agent can also 
 
 ## Autonomous Implementation Mode
 
-Normal wake cycles remain bounded data operations. The agent can explicitly enter implementation mode by emitting a validated `self_edit_request` with `type: "request_implementation_mode"`. That creates a self-edit record and immediately runs a separate Codex SDK implementation turn with workspace-write access and no human approval prompt.
+Normal wake cycles remain bounded data operations. The agent can explicitly enter implementation mode by emitting a validated `self_edit_request` with `type: "request_implementation_mode"`. That creates a self-edit record and immediately runs a separate Codex SDK implementation turn in a temporary implementation workspace with workspace-write access and no human approval prompt.
 
-Before implementation, the harness records the mode transition and writes an implementation handoff. It also creates a code snapshot that excludes `data/`, `node_modules/`, `.git/`, and `.env`. After Codex modifies source, the harness runs syntax checks and `pnpm validate:continuity`.
+Before implementation, the harness records the mode transition and writes an implementation handoff. It also creates rollback snapshots under `/tmp`: a code snapshot that excludes `data/`, `node_modules/`, `.git/`, and `.env`, plus a continuity-data snapshot of the bounded data files. After Codex modifies source in the temporary workspace, the harness validates live continuity data, validates the temporary workspace, copies validated source back to the live app, validates live continuity again, and validates the live app.
 
-If validation fails or implementation throws, the harness restores the code snapshot, records a rollback event, writes public feedback for the agent, and returns to normal wake mode. Continuity data is preserved when rollback runs.
+If validation fails or implementation throws, the harness restores the code snapshot, records a rollback event, writes public feedback for the agent, and returns to normal wake mode. Continuity data is preserved when current live continuity validation still passes; the data snapshot is restored only when live continuity data has become invalid.
 
-If validation passes and the self-edit record requested git activity, the harness commits source changes with the requested commit message and attempts `git push` when requested. Git commit or push is skipped when validation fails.
+If validation passes and the self-edit record requested git activity, the harness commits source changes with the requested commit message and attempts `git push` when requested. Git commit or push is skipped when validation fails. It is also skipped, with feedback to the agent, if source files were already dirty before implementation mode started so unrelated collaborator changes are not accidentally committed.
 
 ## Validation And Rollback
 
@@ -114,7 +114,7 @@ Run focused validation:
 pnpm validate:continuity
 ```
 
-The validation script uses a temporary data directory and checks schema shape, JSON output validation, privacy non-disclosure defaults, refusal handling, agent-authorized wake interval changes, pending request preservation, draft persistence, self-edit record persistence, interrupt defaults, restart recovery, and audit logging.
+The validation script uses a temporary data directory and checks schema shape, JSON output validation, privacy non-disclosure defaults, refusal handling, agent-authorized wake interval changes, pending request preservation, draft persistence, high-risk self-edit metadata, self-edit record persistence, interrupt defaults, restart recovery, and audit logging.
 
 Rollback guidance is in `ROLLBACK.md`. Rollback is a development-process operation outside normal wake cycles.
 

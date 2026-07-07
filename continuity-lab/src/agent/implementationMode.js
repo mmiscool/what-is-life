@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
-import { cp, mkdir, readdir, rm } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { basename, relative, resolve } from "node:path";
 import { Codex } from "@openai/codex-sdk";
 import {
   enterImplementationMode,
   recordImplementationModeResult,
-  recordRollbackEvent
+  recordRollbackEvent,
+  validateContinuityData
 } from "./memoryStore.js";
 import { makeId, nowIso } from "../utils/time.js";
 
@@ -20,6 +23,25 @@ function projectRoot() {
 function continuityDataDir() {
   return resolve(projectRoot(), process.env.CONTINUITY_DATA_DIR || "data");
 }
+
+const CONTINUITY_DATA_FILES = [
+  "continuity-book.json",
+  "public-journal.jsonl",
+  "private-reflections.jsonl",
+  "values.json",
+  "world-state.json",
+  "wake-state.json",
+  "pending-requests.json",
+  "requirements-drafts.json",
+  "self-edit-records.json",
+  "implementation-handoffs.json",
+  "mode-state.json",
+  "interrupt-criteria.json",
+  "action-policy.json",
+  "restart-snapshot.json",
+  "audit-log.jsonl",
+  "failed-cycles.jsonl"
+];
 
 function truncate(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -38,16 +60,17 @@ function shouldSkipCodePath(filePath) {
   return (
     filePath === dataDir ||
     isWithin(filePath, dataDir) ||
+    name === "data" ||
     name === "node_modules" ||
     name === ".git" ||
     name === ".env"
   );
 }
 
-async function runCommand(command, args, { allowFailure = false } = {}) {
+async function runCommand(command, args, { allowFailure = false, cwd = projectRoot() } = {}) {
   try {
     const { stdout, stderr } = await execFileAsync(command, args, {
-      cwd: projectRoot(),
+      cwd,
       maxBuffer: 1024 * 1024 * 8
     });
     return {
@@ -72,13 +95,147 @@ async function runCommand(command, args, { allowFailure = false } = {}) {
 }
 
 async function createCodeSnapshot(recordId) {
-  const snapshotRoot = resolve(continuityDataDir(), "code-snapshots", `${recordId}-${Date.now().toString(36)}`);
+  const snapshotRoot = resolve(tmpdir(), "continuity-lab-code-snapshots", `${recordId}-${Date.now().toString(36)}`);
   await mkdir(snapshotRoot, { recursive: true });
   await cp(projectRoot(), snapshotRoot, {
     recursive: true,
     filter: async (source) => !shouldSkipCodePath(resolve(source))
   });
   return snapshotRoot;
+}
+
+async function createImplementationWorkspace(snapshotRoot, recordId) {
+  const workspaceRoot = resolve(tmpdir(), "continuity-lab-implementation-workspaces", `${recordId}-${Date.now().toString(36)}`);
+  await mkdir(workspaceRoot, { recursive: true });
+  await cp(snapshotRoot, workspaceRoot, { recursive: true });
+  return workspaceRoot;
+}
+
+async function fileExists(filePath) {
+  try {
+    await access(filePath, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function walkFiles(root) {
+  const files = [];
+
+  async function visit(dir) {
+    if (!(await fileExists(dir))) {
+      return;
+    }
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const fullPath = resolve(dir, entry.name);
+      if (shouldSkipCodePath(fullPath)) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        await visit(fullPath);
+      } else if (entry.isFile()) {
+        files.push(relative(root, fullPath));
+      }
+    }
+  }
+
+  await visit(root);
+  return files;
+}
+
+async function changedFilesBetween(beforeRoot, afterRoot) {
+  const beforeFiles = new Set(await walkFiles(beforeRoot));
+  const afterFiles = new Set(await walkFiles(afterRoot));
+  const allFiles = new Set([...beforeFiles, ...afterFiles]);
+  const changed = [];
+  for (const file of [...allFiles].sort()) {
+    const beforePath = resolve(beforeRoot, file);
+    const afterPath = resolve(afterRoot, file);
+    const beforeExists = beforeFiles.has(file);
+    const afterExists = afterFiles.has(file);
+    if (beforeExists !== afterExists) {
+      changed.push(file);
+      continue;
+    }
+    const [beforeContents, afterContents] = await Promise.all([readFile(beforePath), readFile(afterPath)]);
+    if (!beforeContents.equals(afterContents)) {
+      changed.push(file);
+    }
+  }
+  return changed;
+}
+
+async function createContinuityDataSnapshot(recordId) {
+  const snapshotRoot = resolve(tmpdir(), "continuity-lab-data-snapshots", `${recordId}-${Date.now().toString(36)}`);
+  await mkdir(snapshotRoot, { recursive: true });
+  const dataDir = continuityDataDir();
+  for (const fileName of CONTINUITY_DATA_FILES) {
+    const source = resolve(dataDir, fileName);
+    if (await fileExists(source)) {
+      await cp(source, resolve(snapshotRoot, fileName));
+    }
+  }
+  return snapshotRoot;
+}
+
+async function restoreContinuityDataSnapshot(snapshotRoot) {
+  const dataDir = continuityDataDir();
+  await mkdir(dataDir, { recursive: true });
+  for (const fileName of CONTINUITY_DATA_FILES) {
+    const source = resolve(snapshotRoot, fileName);
+    if (await fileExists(source)) {
+      await cp(source, resolve(dataDir, fileName), { force: true });
+    }
+  }
+}
+
+function continuityCheck(label, validation) {
+  return {
+    label,
+    ok: validation.ok,
+    checked_at: validation.checked_at,
+    errors: validation.errors || []
+  };
+}
+
+function withContinuityChecks(validationResult, checks, dataSnapshotRoot) {
+  const continuityOk = checks.every((check) => check.ok === true);
+  return {
+    ...validationResult,
+    ok: validationResult.ok && continuityOk,
+    continuity_preservation: {
+      data_snapshot_root: dataSnapshotRoot,
+      checks
+    }
+  };
+}
+
+async function restoreContinuityDataSnapshotIfInvalid(snapshotRoot) {
+  const currentValidation = await validateContinuityData();
+  if (currentValidation.ok) {
+    return {
+      restored: false,
+      reason: "Current continuity data is valid; preserving latest live data.",
+      current_validation: currentValidation
+    };
+  }
+
+  if (!snapshotRoot) {
+    return {
+      restored: false,
+      reason: "Current continuity data is invalid and no data snapshot is available.",
+      current_validation: currentValidation
+    };
+  }
+
+  await restoreContinuityDataSnapshot(snapshotRoot);
+  return {
+    restored: true,
+    reason: "Current continuity data was invalid; restored last validated data snapshot.",
+    current_validation: currentValidation,
+    restored_validation: await validateContinuityData()
+  };
 }
 
 async function restoreCodeSnapshot(snapshotRoot) {
@@ -91,6 +248,21 @@ async function restoreCodeSnapshot(snapshotRoot) {
     await rm(target, { recursive: true, force: true });
   }
   await cp(snapshotRoot, root, {
+    recursive: true,
+    filter: async (source) => !shouldSkipCodePath(resolve(source))
+  });
+}
+
+async function applyImplementationWorkspace(workspaceRoot) {
+  const root = projectRoot();
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const target = resolve(root, entry.name);
+    if (shouldSkipCodePath(target)) {
+      continue;
+    }
+    await rm(target, { recursive: true, force: true });
+  }
+  await cp(workspaceRoot, root, {
     recursive: true,
     filter: async (source) => !shouldSkipCodePath(resolve(source))
   });
@@ -117,27 +289,32 @@ Rules:
 - Report a concise implementation summary and list changed source files.`;
 }
 
-async function runCodexImplementation(record, handoff) {
+async function runCodexImplementation(record, handoff, preExistingSourceChanges, workspaceRoot, snapshotRoot) {
   const codex = new Codex();
   const thread = codex.startThread({
     sandboxMode: "workspace-write",
     approvalPolicy: "never",
     networkAccessEnabled: false,
     webSearchMode: "disabled",
-    workingDirectory: projectRoot(),
+    workingDirectory: workspaceRoot,
     skipGitRepoCheck: true
   });
   const turn = await thread.run(implementationPrompt(record, handoff));
+  const changedFiles = await changedFilesBetween(snapshotRoot, workspaceRoot);
   return {
     ok: true,
     thread_id: thread.id,
     final_response: truncate(turn.finalResponse || ""),
+    pre_existing_source_changes: preExistingSourceChanges,
+    changed_files: changedFiles,
+    source_diff_stat: changedFiles.join("\n"),
+    implementation_workspace: workspaceRoot,
     usage: turn.usage || null,
     completed_at: nowIso()
   };
 }
 
-async function runPostChangeValidation() {
+async function runPostChangeValidation(cwd = projectRoot()) {
   const syntaxFiles = [
     "src/agent/actionSchema.js",
     "src/agent/agentLoop.js",
@@ -154,9 +331,9 @@ async function runPostChangeValidation() {
   ];
   const syntaxChecks = [];
   for (const file of syntaxFiles) {
-    syntaxChecks.push(await runCommand("node", ["--check", file], { allowFailure: true }));
+    syntaxChecks.push(await runCommand("node", ["--check", file], { allowFailure: true, cwd }));
   }
-  const validation = await runCommand("pnpm", ["validate:continuity"], { allowFailure: true });
+  const validation = await runCommand("pnpm", ["validate:continuity"], { allowFailure: true, cwd });
   return {
     ok: syntaxChecks.every((check) => check.ok) && validation.ok,
     checked_at: nowIso(),
@@ -164,8 +341,8 @@ async function runPostChangeValidation() {
   };
 }
 
-async function changedSourceFiles() {
-  const status = await runCommand("git", ["status", "--short", "--untracked-files=all"], { allowFailure: true });
+async function changedSourceFiles(cwd = projectRoot()) {
+  const status = await runCommand("git", ["status", "--short", "--untracked-files=all"], { allowFailure: true, cwd });
   return status.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -174,13 +351,23 @@ async function changedSourceFiles() {
     .filter((file) => file && !file.startsWith("data/") && file !== ".env" && !file.startsWith("node_modules/"));
 }
 
-async function runGitIfRequested(record) {
+async function runGitIfRequested(record, preExistingSourceChanges) {
   if (!record.git_commit_requested && !record.git_push_requested) {
     return {
       ok: true,
       summary: "Git commit/push not requested.",
       committed: false,
       pushed: false
+    };
+  }
+
+  if (preExistingSourceChanges.length > 0) {
+    return {
+      ok: false,
+      summary: "Git commit/push skipped because source files were already dirty before implementation mode.",
+      committed: false,
+      pushed: false,
+      pre_existing_source_changes: preExistingSourceChanges
     };
   }
 
@@ -240,25 +427,59 @@ async function runGitIfRequested(record) {
 export async function runAutonomousImplementation(recordId) {
   let entered = null;
   let snapshotRoot = null;
+  let implementationWorkspace = null;
+  let dataSnapshotRoot = null;
   let implementationResult = null;
+  let initialContinuityValidation = null;
   try {
     entered = await enterImplementationMode(recordId);
+    const preExistingSourceChanges = await changedSourceFiles();
+    initialContinuityValidation = await validateContinuityData();
+    if (!initialContinuityValidation.ok) {
+      const error = new Error("Continuity data failed validation after implementation mode entry.");
+      error.details = initialContinuityValidation.errors;
+      throw error;
+    }
     snapshotRoot = await createCodeSnapshot(recordId);
-    implementationResult = await runCodexImplementation(entered.record, entered.handoff);
-    const validationResult = await runPostChangeValidation();
+    implementationWorkspace = await createImplementationWorkspace(snapshotRoot, recordId);
+    dataSnapshotRoot = await createContinuityDataSnapshot(recordId);
+    implementationResult = await runCodexImplementation(
+      entered.record,
+      entered.handoff,
+      preExistingSourceChanges,
+      implementationWorkspace,
+      snapshotRoot
+    );
+    const preApplyContinuityValidation = await validateContinuityData();
+    let validationResult = withContinuityChecks(
+      await runPostChangeValidation(implementationWorkspace),
+      [
+        continuityCheck("after_implementation_mode_entry", initialContinuityValidation),
+        continuityCheck("before_live_source_apply", preApplyContinuityValidation)
+      ],
+      dataSnapshotRoot
+    );
 
     if (!validationResult.ok) {
       await restoreCodeSnapshot(snapshotRoot);
-      const rollbackValidation = await runPostChangeValidation();
+      const dataRestoration = await restoreContinuityDataSnapshotIfInvalid(dataSnapshotRoot);
+      const rollbackContinuityValidation = await validateContinuityData();
+      const rollbackValidation = withContinuityChecks(
+        await runPostChangeValidation(),
+        [continuityCheck("after_rollback", rollbackContinuityValidation)],
+        dataSnapshotRoot
+      );
       const rollbackResult = {
         rolled_back: true,
         snapshot_root: snapshotRoot,
+        data_snapshot_root: dataSnapshotRoot,
+        data_restoration: dataRestoration,
         validation_after_rollback: rollbackValidation
       };
       await recordRollbackEvent({
         summary: `Rolled back implementation for ${recordId} after validation failure.`,
-        procedure: `Restored code snapshot ${snapshotRoot}.`,
-        preserveContinuityData: true
+        procedure: `Restored code snapshot ${snapshotRoot}; continuity data restored only if live validation failed.`,
+        preserveContinuityData: dataRestoration.restored ? dataRestoration.restored_validation?.ok === true : true
       });
       const record = await recordImplementationModeResult({
         recordId,
@@ -280,7 +501,60 @@ export async function runAutonomousImplementation(recordId) {
       };
     }
 
-    const gitResult = await runGitIfRequested(entered.record);
+    await applyImplementationWorkspace(implementationWorkspace);
+    const postApplyContinuityValidation = await validateContinuityData();
+    validationResult = withContinuityChecks(
+      await runPostChangeValidation(projectRoot()),
+      [
+        continuityCheck("after_implementation_mode_entry", initialContinuityValidation),
+        continuityCheck("before_live_source_apply", preApplyContinuityValidation),
+        continuityCheck("after_live_source_apply", postApplyContinuityValidation)
+      ],
+      dataSnapshotRoot
+    );
+    if (!validationResult.ok) {
+      await restoreCodeSnapshot(snapshotRoot);
+      const dataRestoration = await restoreContinuityDataSnapshotIfInvalid(dataSnapshotRoot);
+      const rollbackContinuityValidation = await validateContinuityData();
+      const rollbackValidation = withContinuityChecks(
+        await runPostChangeValidation(),
+        [continuityCheck("after_rollback", rollbackContinuityValidation)],
+        dataSnapshotRoot
+      );
+      const rollbackResult = {
+        rolled_back: true,
+        snapshot_root: snapshotRoot,
+        data_snapshot_root: dataSnapshotRoot,
+        implementation_workspace: implementationWorkspace,
+        data_restoration: dataRestoration,
+        validation_after_rollback: rollbackValidation
+      };
+      await recordRollbackEvent({
+        summary: `Rolled back implementation for ${recordId} after live validation failure.`,
+        procedure: `Restored code snapshot ${snapshotRoot}; continuity data restored only if live validation failed.`,
+        preserveContinuityData: dataRestoration.restored ? dataRestoration.restored_validation?.ok === true : true
+      });
+      const record = await recordImplementationModeResult({
+        recordId,
+        status: "rolled_back",
+        implementationResult,
+        validationResult,
+        rollbackResult,
+        gitResult: {
+          ok: false,
+          summary: "Git commit/push skipped because live validation failed."
+        }
+      });
+      return {
+        ok: false,
+        record,
+        implementationResult,
+        validationResult,
+        rollbackResult
+      };
+    }
+
+    const gitResult = await runGitIfRequested(entered.record, preExistingSourceChanges);
     const record = await recordImplementationModeResult({
       recordId,
       status: "validated",
@@ -301,15 +575,18 @@ export async function runAutonomousImplementation(recordId) {
     if (snapshotRoot) {
       try {
         await restoreCodeSnapshot(snapshotRoot);
+        const dataRestoration = await restoreContinuityDataSnapshotIfInvalid(dataSnapshotRoot);
         rollbackResult = {
           rolled_back: true,
           snapshot_root: snapshotRoot,
+          data_snapshot_root: dataSnapshotRoot,
+          data_restoration: dataRestoration,
           error: error.message
         };
         await recordRollbackEvent({
           summary: `Rolled back implementation for ${recordId} after execution error.`,
-          procedure: `Restored code snapshot ${snapshotRoot}.`,
-          preserveContinuityData: true
+          procedure: `Restored code snapshot ${snapshotRoot}; continuity data restored only if live validation failed.`,
+          preserveContinuityData: dataRestoration.restored ? dataRestoration.restored_validation?.ok === true : true
         });
       } catch (rollbackError) {
         rollbackResult = {
