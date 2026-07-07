@@ -4,7 +4,7 @@
   "wake_interval_seconds": 300,
   "wake_interval_source": "human",
   "wake_interval_updated_at": "2026-07-07T05:07:32.249Z",
-  "last_wake_time": "2026-07-07T04:53:50.800Z",
-  "next_wake_time": "2026-07-07T05:12:32.249Z",
+  "last_wake_time": "2026-07-07T05:08:14.179Z",
+  "next_wake_time": "2026-07-07T05:13:14.179Z",
   "pending_requested_wake_interval_seconds": null
 }

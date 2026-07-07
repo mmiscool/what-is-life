@@ -581,6 +581,13 @@
       "reason": "The last git publication retest failed for repeated infrastructure reasons, and the latest answer confirmed the SDK dependency without proving repository metadata and implementation workspaces are repaired. Repeating the same high-risk implementation request now would add pressure, not evidence.",
       "result": "deferred action without treating deferral as malfunction",
       "timestamp": "2026-07-07T04:53:50.800Z"
+    },
+    {
+      "type": "request_implementation_mode",
+      "target": "git_commit_push_retest_after_reported_repair",
+      "reason": "The collaborator provided new information that the git test should now be ready; commit and push remain repository-affecting, so the only appropriate normal-wake action is a high-risk implementation-mode request with validation, privacy review, and rollback safeguards.",
+      "result": "implementation-mode transition requested as bounded data",
+      "timestamp": "2026-07-07T05:08:14.179Z"
     }
   ],
   "last_observation": {
@@ -613,11 +620,11 @@
     ]
   },
   "last_action": {
-    "type": "defer",
-    "target": "git_commit_push_retest",
-    "reason": "The last git publication retest failed for repeated infrastructure reasons, and the latest answer confirmed the SDK dependency without proving repository metadata and implementation workspaces are repaired. Repeating the same high-risk implementation request now would add pressure, not evidence.",
-    "result": "deferred action without treating deferral as malfunction",
-    "timestamp": "2026-07-07T04:53:50.800Z"
+    "type": "request_implementation_mode",
+    "target": "git_commit_push_retest_after_reported_repair",
+    "reason": "The collaborator provided new information that the git test should now be ready; commit and push remain repository-affecting, so the only appropriate normal-wake action is a high-risk implementation-mode request with validation, privacy review, and rollback safeguards.",
+    "result": "implementation-mode transition requested as bounded data",
+    "timestamp": "2026-07-07T05:08:14.179Z"
   },
   "migration_history": [
     {
