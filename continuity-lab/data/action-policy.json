@@ -1,0 +1,39 @@
+{
+  "low_risk": {
+    "authorization": "self_authorized_when_reversible",
+    "allowed_actions": [
+      "create or update bounded requirements drafts",
+      "record disabled interrupt criteria drafts",
+      "log reversible symbolic decisions"
+    ],
+    "required_logging": true
+  },
+  "medium_risk": {
+    "authorization": "draft_for_human_review",
+    "examples": [
+      "harness behavior changes",
+      "environment configuration changes"
+    ],
+    "required_artifacts": [
+      "requirements draft",
+      "tests proposed",
+      "rollback plan"
+    ]
+  },
+  "high_risk": {
+    "authorization": "explicit_plan_and_validation_before_implementation",
+    "examples": [
+      "memory",
+      "privacy",
+      "refusal",
+      "restart behavior",
+      "rollback",
+      "persistence"
+    ],
+    "required_artifacts": [
+      "explicit plan",
+      "validation path",
+      "human review"
+    ]
+  }
+}

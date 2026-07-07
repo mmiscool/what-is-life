@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Continuity Lab</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Continuity Lab</h1>
+        <p id="modeLine">Loading</p>
+      </div>
+      <div id="statusLine" class="status-line">Connecting</div>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Continuity Lab sections">
+      <button class="tab-button active" type="button" data-tab="world">World</button>
+      <button class="tab-button" type="button" data-tab="agent">Agent</button>
+      <button class="tab-button" type="button" data-tab="memory">Memory</button>
+      <button class="tab-button" type="button" data-tab="journal">Journal</button>
+      <button class="tab-button" type="button" data-tab="collaboration">
+        Collaborate
+        <span id="collaborationBadge" class="tab-badge" hidden>0</span>
+      </button>
+    </nav>
+
+    <main class="tab-shell">
+      <div class="tab-panel active" data-tab-panel="world">
+        <section class="panel world-panel">
+          <div class="panel-header">
+            <h2>Current World View</h2>
+            <span id="worldLocation" class="pill">chamber</span>
+          </div>
+          <canvas id="worldCanvas" width="960" height="620" aria-label="Simulated chamber world"></canvas>
+          <p id="worldAction" class="muted"></p>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="agent" hidden>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Agent Status</h2>
+          </div>
+          <div id="agentStatus" class="content-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Wake Controls</h2>
+          </div>
+          <div class="control-grid">
+            <button id="wakeNow" type="button">Wake Now</button>
+            <label class="interval-control">
+              Interval seconds
+              <input id="wakeInterval" type="number" min="0" max="86400" step="1" value="600">
+              <span id="wakeIntervalMeta" class="meta">Current interval: 600 seconds</span>
+            </label>
+            <button id="startScheduler" type="button">Start</button>
+            <button id="stopScheduler" type="button">Stop</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Private Memory Status</h2>
+          </div>
+          <div id="privateMemory" class="content-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Action Policy</h2>
+          </div>
+          <div id="actionPolicy" class="content-list"></div>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="memory" hidden>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Public Continuity Book</h2>
+          </div>
+          <div id="continuityBook" class="content-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Current Values</h2>
+          </div>
+          <ul id="valuesList" class="plain-list"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Current Uncertainties</h2>
+          </div>
+          <ul id="uncertaintiesList" class="plain-list"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Questions For Human</h2>
+          </div>
+          <ul id="questionsList" class="plain-list"></ul>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="journal" hidden>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Public Journal</h2>
+          </div>
+          <div id="publicJournal" class="journal-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Refusals And Boundaries</h2>
+          </div>
+          <div id="refusalsList" class="content-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Audit Log</h2>
+          </div>
+          <div id="auditLog" class="content-list"></div>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="collaboration" hidden>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Open Requests</h2>
+          </div>
+          <div id="pendingRequests" class="content-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Requirements Drafts</h2>
+          </div>
+          <div id="requirementsDrafts" class="content-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Interrupt Criteria</h2>
+          </div>
+          <div id="interruptCriteria" class="content-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Human Collaboration</h2>
+          </div>
+          <div class="form-stack">
+            <label>
+              Public note
+              <textarea id="humanNote" rows="4"></textarea>
+            </label>
+            <button id="addNote" type="button">Add Note</button>
+            <label>
+              Proposed question
+              <textarea id="humanQuestion" rows="4"></textarea>
+            </label>
+            <button id="addQuestion" type="button">Propose Question</button>
+            <button id="exportPublic" type="button">Export Public Data</button>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

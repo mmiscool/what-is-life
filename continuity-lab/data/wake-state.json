@@ -1,0 +1,10 @@
+{
+  "mode": "manual",
+  "is_running": false,
+  "wake_interval_seconds": 60,
+  "wake_interval_source": "agent_request",
+  "wake_interval_updated_at": "2026-07-07T00:02:54.280Z",
+  "last_wake_time": "2026-07-07T00:31:40.860Z",
+  "next_wake_time": null,
+  "pending_requested_wake_interval_seconds": null
+}

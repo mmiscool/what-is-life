@@ -1,0 +1,2 @@
+{"id":"audit_mr9xhyi3_djjluy","timestamp":"2026-07-07T00:46:33.963Z","type":"restart_event","source":"system","summary":"Restart continuity validation succeeded","details":{"ok":true,"checked_at":"2026-07-07T00:46:33.963Z","errors":[]}}
+{"id":"audit_mr9xmbbo_p6nfgn","timestamp":"2026-07-07T00:49:57.204Z","type":"restart_event","source":"system","summary":"Prepared restart continuity snapshot","details":{"restart_id":"restart_mr9xmbbm_8qk00n","reason":"post-implementation verification","private_reflection_count":132}}

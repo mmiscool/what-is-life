@@ -1,1 +1,135 @@
-# what-is-life
+# What Is Life
+
+This repository contains `continuity-lab`, a local-first Node.js prototype for experimenting with bounded agent continuity, memory, privacy, refusal, and symbolic world interaction.
+
+## Requirements
+
+- Node.js 18 or newer
+- pnpm
+
+## Quick Start
+
+From the repository root:
+
+```bash
+cd continuity-lab
+pnpm install
+cp .env.example .env
+pnpm start
+```
+
+Open the app in a browser:
+
+```text
+http://localhost:3000
+```
+
+The app runs wake cycles through the Codex SDK and requires local Codex authentication.
+
+## Environment Configuration
+
+Configuration is loaded from `continuity-lab/.env`.
+
+```env
+PORT=3000
+CONTINUITY_DATA_DIR=./data
+CONTINUITY_CODEX_THREAD_ID=
+CONTINUITY_CODEX_LOG_RAW=1
+```
+
+Common options:
+
+- `PORT`: Local server port. Defaults to `3000`.
+- `CONTINUITY_DATA_DIR`: Directory for continuity memory, journals, values, world state, wake state, and failed cycle logs.
+- `CONTINUITY_CODEX_THREAD_ID`: Optional existing Codex thread ID to resume in Codex mode.
+- `CONTINUITY_CODEX_LOG_RAW`: Set to `0` to suppress Codex SDK response-shape logging.
+
+## Codex Runtime
+
+The runtime uses `@openai/codex-sdk` from the server process.
+
+Before starting the app:
+
+1. Install Codex locally.
+2. Sign in with your ChatGPT/Codex account.
+3. Confirm Codex works from a normal project folder.
+4. Start this app.
+
+```bash
+cd continuity-lab
+pnpm start
+```
+
+Do not set an OpenAI API key unless you intentionally want API-key billing behavior.
+
+## Data Files
+
+Runtime state is stored in `continuity-lab/data` by default. Important files include:
+
+- `continuity-book.json`: public continuity memory
+- `public-journal.jsonl`: append-only public journal
+- `private-reflections.jsonl`: private reflections, not shown in the UI
+- `values.json`: stable values
+- `world-state.json`: symbolic chamber state
+- `wake-state.json`: scheduler and wake interval state
+- `requirements-drafts.json`: agent-authored markdown requirements drafts with review metadata
+- `interrupt-criteria.json`: disabled-by-default future interrupt criteria
+- `audit-log.jsonl`: append-only audit events for drafts, validation, restart, rollback, and policy decisions
+- `restart-snapshot.json`: latest prepared restart continuity snapshot
+- `failed-cycles.jsonl`: invalid or failed wake-cycle outputs
+
+To use a separate data directory, set `CONTINUITY_DATA_DIR` in `.env`.
+
+## Bounded Harness Expansion
+
+Normal wake cycles remain symbolic. The agent can write markdown requirements drafts, log low-risk reversible self-actions, request review for stronger actions, and draft disabled interrupt criteria only through validated JSON output. These actions store bounded data; they do not edit source code, run shell commands, browse externally, use credentials, call real-world APIs, or modify the repository.
+
+Interrupt criteria are storage-only in this version and remain disabled by default.
+
+## Wake Scheduling
+
+Wake intervals are configured in seconds. Set the interval to `0` seconds to let the scheduler continue immediately after each wake cycle finishes. The app still runs only one wake cycle at a time; overlapping cycles are rejected.
+
+The human collaborator can set the active interval directly from the UI. The agent can request an interval change, including `0` seconds, and that request is applied only after human approval.
+
+## Validation And Rollback
+
+Run focused continuity validation:
+
+```bash
+cd continuity-lab
+pnpm validate:continuity
+```
+
+Rollback guidance is documented in `continuity-lab/ROLLBACK.md`. The rollback procedure distinguishes harness-code rollback from continuity-data preservation.
+
+## Development Notes
+
+Start the server with either script:
+
+```bash
+pnpm start
+pnpm dev
+```
+
+Both scripts currently run:
+
+```bash
+node src/server.js
+```
+
+The server resets any running scheduler state on startup, then serves the UI from `continuity-lab/public`.
+
+## Troubleshooting
+
+If the server fails because the port is already in use, change `PORT` in `continuity-lab/.env`:
+
+```env
+PORT=3001
+```
+
+If `pnpm start` fails with a Node version error, install Node.js 18 or newer and rerun the setup commands.
+
+If Codex wake cycles fail, confirm local Codex is installed and signed in, then restart the app.
+
+For the longer project description and conceptual notes, see `continuity-lab/README.md`.

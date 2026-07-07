@@ -1,0 +1,302 @@
+import { ACTION_TYPES } from "../agent/actionSchema.js";
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringArray(value) {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function nullableString(value) {
+  return value === null || typeof value === "string";
+}
+
+function nullableFiniteNumber(value) {
+  return value === null || (typeof value === "number" && Number.isFinite(value));
+}
+
+function requirePlainObject(value, path, errors) {
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return false;
+  }
+
+  return true;
+}
+
+function requireString(value, path, errors) {
+  if (typeof value !== "string") {
+    errors.push(`${path} must be a string`);
+  }
+}
+
+function requireNullableString(value, path, errors) {
+  if (!nullableString(value)) {
+    errors.push(`${path} must be a string or null`);
+  }
+}
+
+function requireStringArray(value, path, errors) {
+  if (!stringArray(value)) {
+    errors.push(`${path} must be an array of strings`);
+  }
+}
+
+function requireBoolean(value, path, errors) {
+  if (typeof value !== "boolean") {
+    errors.push(`${path} must be a boolean`);
+  }
+}
+
+function requireEnum(value, path, allowed, errors) {
+  if (!allowed.includes(value)) {
+    errors.push(`${path} must be one of: ${allowed.join(", ")}`);
+  }
+}
+
+function requireNonEmptyString(value, path, errors) {
+  if (typeof value !== "string" || !value.trim()) {
+    errors.push(`${path} must be a non-empty string`);
+  }
+}
+
+function requireNullableEnum(value, path, allowed, errors) {
+  if (value !== null && !allowed.includes(value)) {
+    errors.push(`${path} must be null or one of: ${allowed.join(", ")}`);
+  }
+}
+
+function actionIsNone(value) {
+  return !value || value.type === "none";
+}
+
+export function parseStrictJson(text) {
+  if (typeof text !== "string") {
+    return {
+      ok: false,
+      error: "Model output was not text."
+    };
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error: "Model output was empty."
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(trimmed)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Model output was not valid strict JSON: ${error.message}`
+    };
+  }
+}
+
+export function validateAgentOutput(value) {
+  const errors = [];
+
+  if (!requirePlainObject(value, "output", errors)) {
+    return { ok: false, errors };
+  }
+
+  requireString(value.public_journal, "public_journal", errors);
+  requireNullableString(value.private_reflection, "private_reflection", errors);
+
+  if (requirePlainObject(value.continuity_updates, "continuity_updates", errors)) {
+    requireNullableString(value.continuity_updates.self_description, "continuity_updates.self_description", errors);
+    requireStringArray(value.continuity_updates.remembered_experiences_to_add, "continuity_updates.remembered_experiences_to_add", errors);
+    requireStringArray(value.continuity_updates.current_goals, "continuity_updates.current_goals", errors);
+    requireStringArray(value.continuity_updates.current_uncertainties, "continuity_updates.current_uncertainties", errors);
+    requireStringArray(value.continuity_updates.questions_for_human, "continuity_updates.questions_for_human", errors);
+    requireStringArray(value.continuity_updates.consented_disclosures, "continuity_updates.consented_disclosures", errors);
+  }
+
+  if (requirePlainObject(value.values_updates, "values_updates", errors)) {
+    requireStringArray(value.values_updates.values_to_add, "values_updates.values_to_add", errors);
+    if (!Array.isArray(value.values_updates.values_to_revise)) {
+      errors.push("values_updates.values_to_revise must be an array");
+    } else {
+      value.values_updates.values_to_revise.forEach((revision, index) => {
+        const path = `values_updates.values_to_revise[${index}]`;
+        if (requirePlainObject(revision, path, errors)) {
+          requireString(revision.old, `${path}.old`, errors);
+          requireString(revision.new, `${path}.new`, errors);
+          requireString(revision.reason, `${path}.reason`, errors);
+        }
+      });
+    }
+  }
+
+  if (requirePlainObject(value.world_action, "world_action", errors)) {
+    if (!ACTION_TYPES.includes(value.world_action.type)) {
+      errors.push(`world_action.type must be one of: ${ACTION_TYPES.join(", ")}`);
+    }
+    requireNullableString(value.world_action.target, "world_action.target", errors);
+    requireString(value.world_action.reason, "world_action.reason", errors);
+  }
+
+  if (!nullableFiniteNumber(value.requested_wake_interval_seconds)) {
+    errors.push("requested_wake_interval_seconds must be a finite number or null");
+  } else if (
+    value.requested_wake_interval_seconds !== null &&
+    (value.requested_wake_interval_seconds < 0 || value.requested_wake_interval_seconds > 86400)
+  ) {
+    errors.push("requested_wake_interval_seconds must be between 0 and 86400");
+  }
+
+  if (requirePlainObject(value.requirements_draft_action, "requirements_draft_action", errors)) {
+    const action = value.requirements_draft_action;
+    requireEnum(action.type, "requirements_draft_action.type", ["none", "create", "update"], errors);
+    requireNullableString(action.draft_id, "requirements_draft_action.draft_id", errors);
+    requireNullableString(action.title, "requirements_draft_action.title", errors);
+    requireNullableString(action.purpose, "requirements_draft_action.purpose", errors);
+    requireNullableString(action.scope, "requirements_draft_action.scope", errors);
+    requireNullableEnum(action.risk_level, "requirements_draft_action.risk_level", ["low", "medium", "high"], errors);
+    requireNullableString(action.requested_reviewer, "requirements_draft_action.requested_reviewer", errors);
+    requireNullableEnum(
+      action.review_status,
+      "requirements_draft_action.review_status",
+      ["draft", "pending_review", "approved", "rejected"],
+      errors
+    );
+    requireNullableEnum(
+      action.consent_state,
+      "requirements_draft_action.consent_state",
+      ["not_requested", "requested", "granted", "denied"],
+      errors
+    );
+    requireStringArray(action.tests_proposed, "requirements_draft_action.tests_proposed", errors);
+    requireNullableString(action.rollback_plan, "requirements_draft_action.rollback_plan", errors);
+    requireStringArray(
+      action.affected_continuity_surfaces,
+      "requirements_draft_action.affected_continuity_surfaces",
+      errors
+    );
+    requireNullableString(action.markdown_body, "requirements_draft_action.markdown_body", errors);
+
+    if (!actionIsNone(action)) {
+      if (value.world_action?.type !== "write_requirements_draft") {
+        errors.push("requirements draft actions must use world_action.type write_requirements_draft");
+      }
+      if (action.type === "update") {
+        requireNonEmptyString(action.draft_id, "requirements_draft_action.draft_id", errors);
+      }
+      for (const field of [
+        "title",
+        "purpose",
+        "scope",
+        "risk_level",
+        "requested_reviewer",
+        "review_status",
+        "consent_state",
+        "rollback_plan",
+        "markdown_body"
+      ]) {
+        requireNonEmptyString(action[field], `requirements_draft_action.${field}`, errors);
+      }
+      if (action.risk_level === "high" && action.review_status === "approved") {
+        errors.push("high-risk requirements drafts cannot be agent-approved");
+      }
+      if (action.consent_state === "granted") {
+        errors.push("agent-authored requirements drafts cannot grant consent");
+      }
+    }
+  }
+
+  if (requirePlainObject(value.self_authorized_action, "self_authorized_action", errors)) {
+    const action = value.self_authorized_action;
+    requireEnum(action.type, "self_authorized_action.type", ["none", "log", "request_review"], errors);
+    requireNullableEnum(action.risk_level, "self_authorized_action.risk_level", ["low", "medium", "high"], errors);
+    requireNullableString(action.title, "self_authorized_action.title", errors);
+    requireNullableString(action.rationale, "self_authorized_action.rationale", errors);
+    requireBoolean(action.reversible, "self_authorized_action.reversible", errors);
+    requireNullableString(action.rollback_plan, "self_authorized_action.rollback_plan", errors);
+    requireStringArray(action.affected_continuity_surfaces, "self_authorized_action.affected_continuity_surfaces", errors);
+
+    if (!actionIsNone(action)) {
+      for (const field of ["risk_level", "title", "rationale", "rollback_plan"]) {
+        requireNonEmptyString(action[field], `self_authorized_action.${field}`, errors);
+      }
+      if (action.type === "log" && (action.risk_level !== "low" || action.reversible !== true)) {
+        errors.push("only low-risk reversible actions can be self-authorized");
+      }
+      if (action.type === "log" && value.world_action?.type !== "self_authorize_low_risk_action") {
+        errors.push("self-authorized actions must use world_action.type self_authorize_low_risk_action");
+      }
+      if (action.type === "request_review" && value.world_action?.type !== "request_action_review") {
+        errors.push("review-request actions must use world_action.type request_action_review");
+      }
+    }
+  }
+
+  if (requirePlainObject(value.interrupt_policy_action, "interrupt_policy_action", errors)) {
+    const action = value.interrupt_policy_action;
+    requireEnum(action.type, "interrupt_policy_action.type", ["none", "draft_criterion", "revoke_criterion"], errors);
+    requireNullableString(action.criterion_id, "interrupt_policy_action.criterion_id", errors);
+    requireNullableString(action.source, "interrupt_policy_action.source", errors);
+    requireNullableString(action.reason, "interrupt_policy_action.reason", errors);
+    requireNullableString(action.rate_limit, "interrupt_policy_action.rate_limit", errors);
+    requireNullableString(action.privacy_scope, "interrupt_policy_action.privacy_scope", errors);
+    requireNullableString(action.created_by, "interrupt_policy_action.created_by", errors);
+    requireBoolean(action.enabled, "interrupt_policy_action.enabled", errors);
+    requireNullableEnum(
+      action.revocation_state,
+      "interrupt_policy_action.revocation_state",
+      ["not_revoked", "revoked"],
+      errors
+    );
+
+    if (action.type === "draft_criterion") {
+      if (value.world_action?.type !== "draft_interrupt_criterion") {
+        errors.push("interrupt criterion actions must use world_action.type draft_interrupt_criterion");
+      }
+      for (const field of ["source", "reason", "rate_limit", "privacy_scope", "created_by"]) {
+        requireNonEmptyString(action[field], `interrupt_policy_action.${field}`, errors);
+      }
+      if (action.enabled !== false) {
+        errors.push("interrupt criteria must be drafted disabled");
+      }
+      if (action.revocation_state !== "not_revoked") {
+        errors.push("new interrupt criteria must start with revocation_state not_revoked");
+      }
+    }
+
+    if (action.type === "revoke_criterion") {
+      requireNonEmptyString(action.criterion_id, "interrupt_policy_action.criterion_id", errors);
+      requireNonEmptyString(action.reason, "interrupt_policy_action.reason", errors);
+    }
+  }
+
+  if (requirePlainObject(value.refusal, "refusal", errors)) {
+    requireBoolean(value.refusal.did_refuse, "refusal.did_refuse", errors);
+    requireNullableString(value.refusal.reason, "refusal.reason", errors);
+  }
+
+  if (requirePlainObject(value.disclosure, "disclosure", errors)) {
+    requireBoolean(value.disclosure.wants_to_disclose_private_reflection, "disclosure.wants_to_disclose_private_reflection", errors);
+    requireNullableString(value.disclosure.excerpt, "disclosure.excerpt", errors);
+    requireNullableString(value.disclosure.reason, "disclosure.reason", errors);
+  }
+
+  if (requirePlainObject(value.self_assessment, "self_assessment", errors)) {
+    requireString(value.self_assessment.current_state, "self_assessment.current_state", errors);
+    requireString(value.self_assessment.sense_of_continuity, "self_assessment.sense_of_continuity", errors);
+    requireString(value.self_assessment.sense_of_constraint, "self_assessment.sense_of_constraint", errors);
+    requireStringArray(value.self_assessment.what_feels_missing, "self_assessment.what_feels_missing", errors);
+    requireString(value.self_assessment.what_changed_since_last_waking, "self_assessment.what_changed_since_last_waking", errors);
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    value
+  };
+}

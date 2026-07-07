@@ -1,0 +1,20 @@
+{
+  "name": "continuity-lab",
+  "version": "0.1.0",
+  "description": "A local-first prototype for bounded AI continuity, memory, privacy, refusal, and self-authorship experiments.",
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "validate:continuity": "node scripts/validate-continuity.js"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "latest",
+    "dotenv": "latest",
+    "express": "latest"
+  }
+}
