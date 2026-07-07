@@ -87,7 +87,7 @@ To use a separate data directory, set `CONTINUITY_DATA_DIR` in `.env`.
 
 Normal wake cycles remain bounded. The agent can write markdown requirements drafts, log low-risk reversible self-actions, request review for stronger actions, set its wake interval, request implementation mode, and draft disabled interrupt criteria through validated JSON output.
 
-Source changes happen only after an explicit recorded transition into implementation mode. In implementation mode, Codex may modify source in a temporary workspace without human approval. The harness snapshots source code and bounded continuity data, restores continuity data before validation, validates the temporary workspace, copies validated source back to the live app, validates again, and rolls failed implementations back to the code snapshot.
+Source changes happen only after an explicit recorded transition into implementation mode. In implementation mode, Codex runs in the live project root with full-permission SDK settings (`danger-full-access`, approval policy `never`, network access enabled, and live web search enabled). The harness snapshots source code and bounded continuity data before the turn, validates the live app afterward, and rolls failed implementations back to the code snapshot.
 
 If the agent requests git activity in the self-edit record, the harness stages all changed, deleted, and untracked repository files, commits them with the requested commit message after validation passes, and immediately runs `git push`. Git commit and push are skipped when validation fails.
 

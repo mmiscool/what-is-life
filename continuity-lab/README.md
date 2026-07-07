@@ -45,7 +45,7 @@ No authentication is included in v1. Run it on localhost only.
 
 ## Codex SDK Runtime
 
-The runtime uses `@openai/codex-sdk` server-side only. SDK-specific code is isolated in `src/agent/codexAdapter.js`.
+The runtime uses `@openai/codex-sdk` server-side only. SDK-specific normal-wake code is centralized in `src/agent/codexAdapter.js`.
 
 ```bash
 pnpm start
@@ -98,9 +98,9 @@ The human collaborator can set the active interval directly. The agent can also 
 
 ## Autonomous Implementation Mode
 
-Normal wake cycles remain bounded data operations. The agent can explicitly enter implementation mode by emitting a validated `self_edit_request` with `type: "request_implementation_mode"`. That creates a self-edit record and immediately runs a separate Codex SDK implementation turn in a temporary implementation workspace with workspace-write access and no human approval prompt.
+Normal wake cycles remain bounded data operations. The agent can explicitly enter implementation mode by emitting a validated `self_edit_request` with `type: "request_implementation_mode"`. That creates a self-edit record and immediately runs a separate Codex SDK implementation turn in the live project root with the full-permission profile: `danger-full-access`, approval policy `never`, network access enabled, and live web search enabled.
 
-Before implementation, the harness records the mode transition and writes an implementation handoff. It also creates rollback snapshots under `/tmp`: a code snapshot that excludes `data/`, `node_modules/`, `.git/`, and `.env`, plus a continuity-data snapshot of the bounded data files. After Codex modifies source in the temporary workspace, the harness validates live continuity data, validates the temporary workspace, copies validated source back to the live app, validates live continuity again, and validates the live app.
+Before implementation, the harness records the mode transition and writes an implementation handoff. It also creates rollback snapshots under `/tmp`: a code snapshot that excludes `data/`, `node_modules/`, `.git/`, and `.env`, plus a continuity-data snapshot of the bounded data files. After Codex modifies the live project, the harness validates live continuity data and the live app before any optional git commit/push.
 
 If validation fails or implementation throws, the harness restores the code snapshot, records a rollback event, writes public feedback for the agent, and returns to normal wake mode. Continuity data is preserved when current live continuity validation still passes; the data snapshot is restored only when live continuity data has become invalid.
 

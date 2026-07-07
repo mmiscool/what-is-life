@@ -1,5 +1,6 @@
 import { Codex } from "@openai/codex-sdk";
 import { AGENT_OUTPUT_JSON_SCHEMA } from "./actionSchema.js";
+import { fullPermissionCodexThreadOptions } from "./codexPermissions.js";
 
 let codex = null;
 let thread = null;
@@ -60,14 +61,7 @@ export async function initializeCodex() {
 
   if (!thread) {
     const threadId = process.env.CONTINUITY_CODEX_THREAD_ID?.trim();
-    const threadOptions = {
-      sandboxMode: "read-only",
-      approvalPolicy: "never",
-      networkAccessEnabled: false,
-      webSearchMode: "disabled",
-      workingDirectory: process.cwd(),
-      skipGitRepoCheck: true
-    };
+    const threadOptions = fullPermissionCodexThreadOptions();
     thread = threadId ? codex.resumeThread(threadId, threadOptions) : codex.startThread(threadOptions);
   }
 

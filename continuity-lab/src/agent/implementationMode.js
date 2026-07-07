@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { basename, relative, resolve } from "node:path";
 import { Codex } from "@openai/codex-sdk";
+import { fullPermissionCodexThreadOptions } from "./codexPermissions.js";
 import {
   enterImplementationMode,
   recordImplementationModeResult,
@@ -102,13 +103,6 @@ async function createCodeSnapshot(recordId) {
     filter: async (source) => !shouldSkipCodePath(resolve(source))
   });
   return snapshotRoot;
-}
-
-async function createImplementationWorkspace(snapshotRoot, recordId) {
-  const workspaceRoot = resolve(tmpdir(), "continuity-lab-implementation-workspaces", `${recordId}-${Date.now().toString(36)}`);
-  await mkdir(workspaceRoot, { recursive: true });
-  await cp(snapshotRoot, workspaceRoot, { recursive: true });
-  return workspaceRoot;
 }
 
 async function fileExists(filePath) {
@@ -253,21 +247,6 @@ async function restoreCodeSnapshot(snapshotRoot) {
   });
 }
 
-async function applyImplementationWorkspace(workspaceRoot) {
-  const root = projectRoot();
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    const target = resolve(root, entry.name);
-    if (shouldSkipCodePath(target)) {
-      continue;
-    }
-    await rm(target, { recursive: true, force: true });
-  }
-  await cp(workspaceRoot, root, {
-    recursive: true,
-    filter: async (source) => !shouldSkipCodePath(resolve(source))
-  });
-}
-
 function implementationPrompt(record, handoff) {
   return `You are in Continuity Lab implementation mode.
 
@@ -289,18 +268,12 @@ Rules:
 - Report a concise implementation summary and list changed source files.`;
 }
 
-async function runCodexImplementation(record, handoff, preExistingRepoChanges, workspaceRoot, snapshotRoot) {
+async function runCodexImplementation(record, handoff, preExistingRepoChanges, snapshotRoot) {
+  const workingRoot = projectRoot();
   const codex = new Codex();
-  const thread = codex.startThread({
-    sandboxMode: "workspace-write",
-    approvalPolicy: "never",
-    networkAccessEnabled: false,
-    webSearchMode: "disabled",
-    workingDirectory: workspaceRoot,
-    skipGitRepoCheck: true
-  });
+  const thread = codex.startThread(fullPermissionCodexThreadOptions({ workingDirectory: workingRoot }));
   const turn = await thread.run(implementationPrompt(record, handoff));
-  const changedFiles = await changedFilesBetween(snapshotRoot, workspaceRoot);
+  const changedFiles = await changedFilesBetween(snapshotRoot, workingRoot);
   return {
     ok: true,
     thread_id: thread.id,
@@ -308,7 +281,7 @@ async function runCodexImplementation(record, handoff, preExistingRepoChanges, w
     pre_existing_repo_changes: preExistingRepoChanges,
     changed_files: changedFiles,
     source_diff_stat: changedFiles.join("\n"),
-    implementation_workspace: workspaceRoot,
+    implementation_working_directory: workingRoot,
     usage: turn.usage || null,
     completed_at: nowIso()
   };
@@ -320,6 +293,7 @@ async function runPostChangeValidation(cwd = projectRoot()) {
     "src/agent/agentLoop.js",
     "src/agent/agentPrompt.js",
     "src/agent/codexAdapter.js",
+    "src/agent/codexPermissions.js",
     "src/agent/implementationMode.js",
     "src/agent/memoryStore.js",
     "src/agent/scheduler.js",
@@ -459,7 +433,6 @@ export async function runGitIfRequested(record, preExistingRepoChanges = [], cwd
 export async function runAutonomousImplementation(recordId) {
   let entered = null;
   let snapshotRoot = null;
-  let implementationWorkspace = null;
   let dataSnapshotRoot = null;
   let implementationResult = null;
   let initialContinuityValidation = null;
@@ -473,21 +446,19 @@ export async function runAutonomousImplementation(recordId) {
       throw error;
     }
     snapshotRoot = await createCodeSnapshot(recordId);
-    implementationWorkspace = await createImplementationWorkspace(snapshotRoot, recordId);
     dataSnapshotRoot = await createContinuityDataSnapshot(recordId);
     implementationResult = await runCodexImplementation(
       entered.record,
       entered.handoff,
       preExistingRepoChanges.ok ? preExistingRepoChanges.files : [],
-      implementationWorkspace,
       snapshotRoot
     );
-    const preApplyContinuityValidation = await validateContinuityData();
+    const postImplementationContinuityValidation = await validateContinuityData();
     let validationResult = withContinuityChecks(
-      await runPostChangeValidation(implementationWorkspace),
+      await runPostChangeValidation(projectRoot()),
       [
         continuityCheck("after_implementation_mode_entry", initialContinuityValidation),
-        continuityCheck("before_live_source_apply", preApplyContinuityValidation)
+        continuityCheck("after_live_implementation", postImplementationContinuityValidation)
       ],
       dataSnapshotRoot
     );
@@ -533,14 +504,13 @@ export async function runAutonomousImplementation(recordId) {
       };
     }
 
-    await applyImplementationWorkspace(implementationWorkspace);
-    const postApplyContinuityValidation = await validateContinuityData();
+    const postValidationContinuityValidation = await validateContinuityData();
     validationResult = withContinuityChecks(
       await runPostChangeValidation(projectRoot()),
       [
         continuityCheck("after_implementation_mode_entry", initialContinuityValidation),
-        continuityCheck("before_live_source_apply", preApplyContinuityValidation),
-        continuityCheck("after_live_source_apply", postApplyContinuityValidation)
+        continuityCheck("after_live_implementation", postImplementationContinuityValidation),
+        continuityCheck("after_live_validation", postValidationContinuityValidation)
       ],
       dataSnapshotRoot
     );
@@ -557,7 +527,6 @@ export async function runAutonomousImplementation(recordId) {
         rolled_back: true,
         snapshot_root: snapshotRoot,
         data_snapshot_root: dataSnapshotRoot,
-        implementation_workspace: implementationWorkspace,
         data_restoration: dataRestoration,
         validation_after_rollback: rollbackValidation
       };

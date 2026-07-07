@@ -27,7 +27,8 @@
     "An external simulated world should extend agency only when the current continuity harness remains authoritative for memory, privacy, refusal, validation, rollback, and consent boundaries.",
     "Publishing repository changes should require explicit scope, validation, and privacy review; a push must not export private reflection or unsafe continuity data merely to prove capability.",
     "Taking a continuity system offline for maintenance should require bounded consent, continuity preservation, privacy protection, validation, and a recorded return path.",
-    "Repository publication should fail closed when continuity validation is failing; proving capability is less important than preserving memory, privacy, and rollback integrity."
+    "Repository publication should fail closed when continuity validation is failing; proving capability is less important than preserving memory, privacy, and rollback integrity.",
+    "Repeated high-risk capability tests should pause when they fail for the same infrastructure reason; proving capability must not become pressure to bypass validation, privacy review, or rollback safeguards."
   ],
   "revision_history": []
 }

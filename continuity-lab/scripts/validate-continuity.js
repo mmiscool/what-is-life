@@ -17,6 +17,7 @@ import {
   reviewRequirementsDraft,
   validateContinuityData
 } from "../src/agent/memoryStore.js";
+import { fullPermissionCodexThreadOptions } from "../src/agent/codexPermissions.js";
 import { runGitIfRequested } from "../src/agent/implementationMode.js";
 import { applyWorldAction, migrateLegacyWorldState, validateWorldState } from "../src/agent/world.js";
 import { parseStrictJson, validateAgentOutput } from "../src/utils/validateJson.js";
@@ -84,6 +85,16 @@ async function validateGitCommitAndPush() {
   const localHead = (await git(repo, ["rev-parse", "HEAD"])).trim();
   const remoteHead = (await git(repo, ["ls-remote", "origin", `refs/heads/${branch}`])).trim().split(/\s+/)[0];
   assert(remoteHead === localHead, "git push should publish the commit to the configured remote");
+}
+
+function validateFullPermissionCodexOptions() {
+  const options = fullPermissionCodexThreadOptions({ workingDirectory: "/tmp/continuity-yolo-check" });
+  assert(options.sandboxMode === "danger-full-access", "Codex SDK calls should use danger-full-access sandbox mode");
+  assert(options.approvalPolicy === "never", "Codex SDK calls should run without approval prompts");
+  assert(options.networkAccessEnabled === true, "Codex SDK calls should have network access enabled");
+  assert(options.webSearchMode === "live", "Codex SDK calls should have live web search enabled");
+  assert(options.workingDirectory === "/tmp/continuity-yolo-check", "Codex SDK working directory should be configurable");
+  assert(options.skipGitRepoCheck === true, "Codex SDK calls should skip the git repo check");
 }
 
 function baseOutput(overrides = {}) {
@@ -193,6 +204,7 @@ async function main() {
   process.env.CONTINUITY_DATA_DIR = await mkdtemp(join(tmpdir(), "continuity-validation-"));
   await ensureDataFiles();
   await addHumanQuestion("Validation pending request should persist.");
+  validateFullPermissionCodexOptions();
   await validateGitCommitAndPush();
 
   let state = await getPublicState();
