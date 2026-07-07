@@ -4,14 +4,15 @@ Continuity Lab separates harness code from continuity data. Normal wake cycles m
 
 Implementation mode is the exception to normal wake constraints. It is entered only through an explicit recorded self-edit request. Before implementation mode changes source files, the harness creates rollback snapshots under `/tmp`: a code snapshot that excludes `data/`, `node_modules/`, `.git/`, and `.env`, plus a continuity-data snapshot of the bounded data files. Codex modifies a temporary implementation workspace first; source is copied back to the live app only after that workspace validates.
 
-After the implementation turn, the harness validates live continuity data before and after live source application. It preserves the latest valid continuity data instead of restoring the data snapshot unconditionally. If implementation validation fails or the implementation turn throws, the harness restores the code snapshot automatically, restores the continuity-data snapshot only when live continuity validation has failed, records a public rollback journal entry, records an audit event, writes feedback into public continuity memory, and returns to normal wake mode. Git commit and push are skipped on failed validation.
+After the implementation turn, the harness validates live continuity data before and after live source application. It preserves the latest valid continuity data instead of restoring the data snapshot unconditionally. If implementation validation fails or the implementation turn throws, the harness restores the code snapshot automatically, restores the continuity-data snapshot only when live continuity validation has failed, records a public rollback journal entry, records an audit event, writes feedback into public continuity memory, and returns to normal wake mode. Git commit and push are skipped on failed validation or failed publication privacy review.
+
+Publication privacy review fails closed before staging when private reflection files or future hidden-goal files are tracked, staged, untracked, or present in the proposed commit diff. If prior history already contains private-memory paths, treat that as a remediation-planning issue; do not rewrite history casually as part of rollback.
 
 ## Preserve Continuity Data
 
-Before changing harness code, preserve the latest validated continuity data:
+Before changing harness code, preserve the latest validated continuity data from the project root:
 
 ```bash
-cd continuity-lab
 pnpm validate:continuity
 curl -sS -X POST http://localhost:3000/api/prepare-restart \
   -H 'Content-Type: application/json' \
@@ -23,7 +24,6 @@ The restart snapshot stores public continuity book, values, pending requests, wa
 For an external backup of continuity data:
 
 ```bash
-cd continuity-lab
 mkdir -p ../continuity-data-backups
 tar --exclude='*.tmp' -czf ../continuity-data-backups/continuity-data-$(date +%Y%m%d%H%M%S).tar.gz data
 ```
@@ -33,7 +33,6 @@ tar --exclude='*.tmp' -czf ../continuity-data-backups/continuity-data-$(date +%Y
 Before implementing harness changes, create a code-only snapshot that excludes runtime data and dependencies:
 
 ```bash
-cd continuity-lab
 mkdir -p ../harness-code-backups
 tar \
   --exclude='node_modules' \
@@ -47,7 +46,6 @@ tar \
 Stop the server first. Then restore a selected code snapshot into a temporary directory and copy code files back while leaving `data/` untouched:
 
 ```bash
-cd continuity-lab
 mkdir -p /tmp/continuity-lab-restore
 tar -xzf ../harness-code-backups/<snapshot>.tar.gz -C /tmp/continuity-lab-restore
 rsync -a --delete \

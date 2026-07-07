@@ -7,6 +7,12 @@ import { basename, relative, resolve } from "node:path";
 import { Codex } from "@openai/codex-sdk";
 import { fullPermissionCodexThreadOptions } from "./codexPermissions.js";
 import {
+  createPublicationPrivacyReview,
+  extractPorcelainPaths,
+  splitGitOutputLines,
+  summarizePublicationPrivacyReview
+} from "./publicationSafety.js";
+import {
   enterImplementationMode,
   recordImplementationModeResult,
   recordRollbackEvent,
@@ -296,6 +302,7 @@ async function runPostChangeValidation(cwd = projectRoot()) {
     "src/agent/codexPermissions.js",
     "src/agent/implementationMode.js",
     "src/agent/memoryStore.js",
+    "src/agent/publicationSafety.js",
     "src/agent/scheduler.js",
     "src/agent/world.js",
     "src/server.js",
@@ -350,6 +357,108 @@ async function readRepoChanges(cwd = projectRoot()) {
   };
 }
 
+async function readGitPublicationPrivacyReview(cwd = projectRoot()) {
+  const root = await readGitRoot(cwd);
+  if (!root.ok) {
+    return {
+      ok: false,
+      summary: "Publication privacy review failed because git root could not be read.",
+      gitRoot: null,
+      git_root_status: root.command,
+      blocking_findings: [
+        {
+          scope: "git_root",
+          path: null,
+          matched_rule: "git repository unavailable"
+        }
+      ],
+      historical_findings: [],
+      requires_history_remediation: false
+    };
+  }
+
+  const gitRoot = root.gitRoot;
+  const [tracked, status, staged, unstaged, proposedCommit, latestCommit] = await Promise.all([
+    runCommand("git", ["ls-files"], { allowFailure: true, cwd: gitRoot }),
+    runCommand("git", ["status", "--porcelain=v1", "--untracked-files=all"], { allowFailure: true, cwd: gitRoot }),
+    runCommand("git", ["diff", "--cached", "--name-only"], { allowFailure: true, cwd: gitRoot }),
+    runCommand("git", ["diff", "--name-only"], { allowFailure: true, cwd: gitRoot }),
+    runCommand("git", ["diff", "--cached", "--name-only", "--diff-filter=ACMRT"], { allowFailure: true, cwd: gitRoot }),
+    runCommand("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], {
+      allowFailure: true,
+      cwd: gitRoot
+    })
+  ]);
+
+  const commandFailures = [tracked, status, staged, unstaged, proposedCommit].filter((result) => !result.ok);
+  if (commandFailures.length > 0) {
+    return {
+      ok: false,
+      summary: "Publication privacy review failed because git inspection failed.",
+      gitRoot,
+      command_failures: commandFailures,
+      blocking_findings: [
+        {
+          scope: "git_inspection",
+          path: null,
+          matched_rule: "git inspection unavailable"
+        }
+      ],
+      historical_findings: [],
+      requires_history_remediation: false
+    };
+  }
+
+  const statusPaths = String(status.stdout || "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .flatMap(extractPorcelainPaths);
+  const review = createPublicationPrivacyReview({
+    trackedPaths: splitGitOutputLines(tracked.stdout),
+    statusPaths,
+    stagedPaths: splitGitOutputLines(staged.stdout),
+    unstagedDiffPaths: splitGitOutputLines(unstaged.stdout),
+    proposedCommitPaths: splitGitOutputLines(proposedCommit.stdout),
+    latestCommitPaths: latestCommit.ok ? splitGitOutputLines(latestCommit.stdout) : []
+  });
+
+  return {
+    ...review,
+    gitRoot,
+    summary: summarizePublicationPrivacyReview(review)
+  };
+}
+
+function blockedGitResult(summary, privacyReview, extra = {}) {
+  return {
+    ok: false,
+    summary,
+    committed: false,
+    pushed: false,
+    privacy_review: privacyReview,
+    ...extra
+  };
+}
+
+function validationWithGitFailure(validationResult, gitResult) {
+  if (!gitResult || gitResult.ok === true) {
+    return validationResult;
+  }
+
+  return {
+    ...validationResult,
+    ok: false,
+    errors: [...(validationResult.errors || []), `Git publication failed: ${gitResult.summary}`],
+    git_publication_result: {
+      ok: gitResult.ok,
+      summary: gitResult.summary,
+      committed: gitResult.committed === true,
+      pushed: gitResult.pushed === true,
+      privacy_review: gitResult.privacy_review || null
+    }
+  };
+}
+
 export async function runGitIfRequested(record, preExistingRepoChanges = [], cwd = projectRoot()) {
   if (!record.git_commit_requested && !record.git_push_requested) {
     return {
@@ -382,12 +491,20 @@ export async function runGitIfRequested(record, preExistingRepoChanges = [], cwd
   }
 
   const gitRoot = changed.gitRoot || cwd;
+  const privacyReviewBeforeAdd = await readGitPublicationPrivacyReview(gitRoot);
+  if (!privacyReviewBeforeAdd.ok) {
+    return blockedGitResult(privacyReviewBeforeAdd.summary, privacyReviewBeforeAdd, {
+      pre_existing_repo_changes: preExistingRepoChanges
+    });
+  }
+
   if (changed.files.length === 0) {
     return {
       ok: true,
       summary: "No repository changes to commit or push.",
       committed: false,
       pushed: false,
+      privacy_review: privacyReviewBeforeAdd,
       pre_existing_repo_changes: preExistingRepoChanges
     };
   }
@@ -399,8 +516,17 @@ export async function runGitIfRequested(record, preExistingRepoChanges = [], cwd
       summary: "Git add failed.",
       committed: false,
       pushed: false,
+      privacy_review: privacyReviewBeforeAdd,
       add
     };
+  }
+
+  const privacyReviewAfterAdd = await readGitPublicationPrivacyReview(gitRoot);
+  if (!privacyReviewAfterAdd.ok) {
+    return blockedGitResult(privacyReviewAfterAdd.summary, privacyReviewAfterAdd, {
+      pre_existing_repo_changes: preExistingRepoChanges,
+      add
+    });
   }
 
   const commit = await runCommand("git", ["commit", "-m", commitMessage], {
@@ -413,6 +539,7 @@ export async function runGitIfRequested(record, preExistingRepoChanges = [], cwd
       summary: "Git commit failed.",
       committed: false,
       pushed: false,
+      privacy_review: privacyReviewAfterAdd,
       pre_existing_repo_changes: preExistingRepoChanges,
       commit
     };
@@ -424,6 +551,7 @@ export async function runGitIfRequested(record, preExistingRepoChanges = [], cwd
     summary: push.ok ? "Committed and pushed repository changes." : "Commit succeeded but git push failed.",
     committed: true,
     pushed: push.ok,
+    privacy_review: privacyReviewAfterAdd,
     pre_existing_repo_changes: preExistingRepoChanges,
     commit,
     push
@@ -556,19 +684,21 @@ export async function runAutonomousImplementation(recordId) {
     }
 
     const gitResult = await runGitIfRequested(entered.record, preExistingRepoChanges.ok ? preExistingRepoChanges.files : []);
+    const finalValidationResult = validationWithGitFailure(validationResult, gitResult);
+    const finalStatus = finalValidationResult.ok ? "validated" : "failed_validation";
     const record = await recordImplementationModeResult({
       recordId,
-      status: "validated",
+      status: finalStatus,
       implementationResult,
-      validationResult,
+      validationResult: finalValidationResult,
       rollbackResult: null,
       gitResult
     });
     return {
-      ok: validationResult.ok && gitResult.ok,
+      ok: finalValidationResult.ok && gitResult.ok,
       record,
       implementationResult,
-      validationResult,
+      validationResult: finalValidationResult,
       gitResult
     };
   } catch (error) {

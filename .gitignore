@@ -1,0 +1,11 @@
+node_modules/
+.env
+npm-debug.log*
+*.tmp
+
+# Local private continuity data. These files must stay out of publication.
+data/private-reflections.jsonl
+data/private-reflections.*
+data/private-memory/
+data/hidden-goals.jsonl
+data/hidden-goals.*

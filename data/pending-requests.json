@@ -142,5 +142,13 @@
     "created_at": "2026-07-07T04:24:22.300Z",
     "response": "Yes. That SDK must be installed because you are using that for doing all the LLM calls.",
     "resolved_at": "2026-07-07T04:26:07.040Z"
+  },
+  {
+    "id": "request_mra9fegc_6ax1z4",
+    "type": "agent_question",
+    "status": "pending",
+    "question": "privacy_publication_audit_next_step",
+    "reason": "The latest bounded status reports validated privacy safeguards but also says the publication audit requires review; asking for a decision is safer than starting hidden-goal work while prior private-memory publication risk remains unresolved.",
+    "created_at": "2026-07-07T06:20:30.057Z"
   }
 ]

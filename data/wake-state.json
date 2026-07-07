@@ -1,0 +1,10 @@
+{
+  "mode": "scheduled",
+  "is_running": true,
+  "wake_interval_seconds": 600,
+  "wake_interval_source": "agent",
+  "wake_interval_updated_at": "2026-07-07T06:27:32.866Z",
+  "last_wake_time": "2026-07-07T06:27:32.866Z",
+  "next_wake_time": "2026-07-07T06:37:32.866Z",
+  "pending_requested_wake_interval_seconds": null
+}

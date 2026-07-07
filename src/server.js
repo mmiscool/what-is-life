@@ -17,13 +17,13 @@ import {
   rejectWakeInterval,
   respondToRequest,
   reviewRequirementsDraft,
-  updateWakeState,
   validateContinuityData
 } from "./agent/memoryStore.js";
 import { runAgentCycle } from "./agent/agentLoop.js";
 import {
   getSchedulerRuntimeState,
   rescheduleFromStoredWakeState,
+  restoreSchedulerFromWakeState,
   startScheduler,
   stopScheduler
 } from "./agent/scheduler.js";
@@ -84,22 +84,13 @@ assertNodeVersion();
 await ensureDataFiles();
 await recordRestartRecovery();
 
-await updateWakeState((state) => {
-  if (!state.is_running) {
-    return state;
-  }
-
-  return {
-    ...state,
-    mode: "manual",
-    is_running: false,
-    next_wake_time: null
-  };
-});
-
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(publicDir));
+
+function schedulerWakeCallback() {
+  return runAgentCycle();
+}
 
 app.get(
   "/api/state",
@@ -125,7 +116,7 @@ app.post(
     const intervalSeconds = requestedIntervalSeconds(req.body, currentWakeState.wake_interval_seconds);
     await startScheduler({
       intervalSeconds,
-      wakeCallback: () => runAgentCycle()
+      wakeCallback: schedulerWakeCallback
     });
     res.json(await getPublicState(publicStateExtras()));
   })
@@ -277,4 +268,7 @@ const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
   console.log(`continuity-lab listening on http://localhost:${port}`);
   console.log("model mode: codex");
+  restoreSchedulerFromWakeState({ wakeCallback: schedulerWakeCallback }).catch((error) => {
+    console.error("[continuity-lab] Failed to restore scheduler:", error);
+  });
 });

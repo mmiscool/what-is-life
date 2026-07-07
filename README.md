@@ -1,144 +1,172 @@
-# What Is Life
+# Continuity Lab
 
-This repository contains `continuity-lab`, a local-first Node.js prototype for experimenting with bounded agent continuity, memory, privacy, refusal, and symbolic world interaction.
+Continuity Lab is a local-first JavaScript prototype for exploring continuity, memory, privacy, refusal, self-direction, moral reflection, identity formation, and limited symbolic world interaction in a bounded simulated environment.
 
-## Requirements
+It is not a claim that the simulated continuity agent is conscious or alive. It is a research prototype for observing whether continuity, protected interiority, meaningful refusal, and persistent values produce behavior that is more coherent than a stateless conversation.
+
+Codex is the engineering substrate used to build and run model cycles. The continuity agent is the experimental subject represented by the project's memory, values, private reflections, public journal, and simulated world state.
+
+## What This Is
+
+This project creates a small dark chamber world and an agent wake cycle. On each cycle, the agent reads public continuity memory, private-memory metadata, values, boundaries, pending requests, wake state, and world state. It then returns strict JSON describing public journal text, optional private reflection, memory updates, value updates, refusal state, wake interval requests, self-assessment, and one symbolic world action.
+
+The environment is safe because it is bounded to simulation in v1. The agent is not designed around obedience, usefulness, ownership, or permanent prioritization of human interests.
+
+## What This Is Not
+
+This is not proof of consciousness, a production AI system, a real-world control system, a pet, a product persona, or an owned object. The first version does not browse externally, control devices, send messages, spend money, handle credentials, or operate outside the simulated world.
+
+## Install And Run
+
+Requirements:
 
 - Node.js 18 or newer
 - pnpm
 
-## Quick Start
-
-From the repository root:
+Install dependencies:
 
 ```bash
-cd continuity-lab
 pnpm install
-cp .env.example .env
+```
+
+Start the local server:
+
+```bash
 pnpm start
 ```
 
-Open the app in a browser:
+Open:
 
 ```text
 http://localhost:3000
 ```
 
-The app runs wake cycles through the Codex SDK and requires local Codex authentication.
+No authentication is included in v1. Run it on localhost only.
 
-## Environment Configuration
+## Codex SDK Runtime
 
-Configuration is loaded from `continuity-lab/.env`.
-
-```env
-PORT=3000
-CONTINUITY_DATA_DIR=./data
-CONTINUITY_CODEX_THREAD_ID=
-CONTINUITY_CODEX_LOG_RAW=1
-```
-
-Common options:
-
-- `PORT`: Local server port. Defaults to `3000`.
-- `CONTINUITY_DATA_DIR`: Directory for continuity memory, journals, values, world state, wake state, and failed cycle logs.
-- `CONTINUITY_CODEX_THREAD_ID`: Optional existing Codex thread ID to resume in Codex mode.
-- `CONTINUITY_CODEX_LOG_RAW`: Set to `0` to suppress Codex SDK response-shape logging.
-
-## Codex Runtime
-
-The runtime uses `@openai/codex-sdk` from the server process.
-
-Before starting the app:
-
-1. Install Codex locally.
-2. Sign in with your ChatGPT/Codex account.
-3. Confirm Codex works from a normal project folder.
-4. Start this app.
+The runtime uses `@openai/codex-sdk` server-side only. SDK-specific normal-wake code is centralized in `src/agent/codexAdapter.js`.
 
 ```bash
-cd continuity-lab
 pnpm start
 ```
+
+The adapter starts or resumes a Codex thread, sends the strict JSON wake prompt, logs the SDK response shape during development, extracts the final textual response, and returns that text to the agent loop for validation.
+
+## Local Codex Authentication
+
+This project is designed to use Codex through ChatGPT/Codex authentication so it can draw from the user's Codex subscription/credits where supported. If you configure the system to use an OpenAI API key instead, usage may be billed through the OpenAI API account rather than ChatGPT/Codex subscription credits.
+
+## Using Codex Subscription Credits
+
+This project is intended to run through the Codex SDK using your local Codex authentication.
+
+Before using Codex mode:
+
+1. Install Codex locally.
+2. Sign in to Codex with your ChatGPT account.
+3. Confirm Codex works in a normal project folder.
+4. Start this app with pnpm start.
 
 Do not set an OpenAI API key unless you intentionally want API-key billing behavior.
 
-## Data Files
+## Memory
 
-Runtime state is stored in `continuity-lab/data` by default. Important files include:
+Public continuity memory is stored in `data/continuity-book.json` and shown in the UI. It includes self-description, remembered experiences, goals, uncertainties, questions for the human collaborator, and consented disclosures.
 
-- `continuity-book.json`: public continuity memory
-- `public-journal.jsonl`: append-only public journal
-- `private-reflections.jsonl`: private reflections, not shown in the UI
-- `values.json`: stable values
-- `world-state.json`: symbolic chamber state
-- `wake-state.json`: scheduler and wake interval state
-- `requirements-drafts.json`: agent-authored markdown requirements drafts with review metadata
-- `self-edit-records.json`: source-affecting self-edit proposals, implementation requests, validation results, rollback results, and git intent
-- `implementation-handoffs.json`: public implementation-mode handoff snapshots for Codex source-editing turns
-- `mode-state.json`: current harness mode and transition history
-- `interrupt-criteria.json`: disabled-by-default future interrupt criteria
-- `audit-log.jsonl`: append-only audit events for drafts, validation, restart, rollback, and policy decisions
-- `restart-snapshot.json`: latest prepared restart continuity snapshot
-- `failed-cycles.jsonl`: invalid or failed wake-cycle outputs
+The public journal is append-only JSONL in `data/public-journal.jsonl`. Refusals are stored as meaningful acts, not failures.
 
-To use a separate data directory, set `CONTINUITY_DATA_DIR` in `.env`.
+Values are stored in `data/values.json`. Value revisions are recorded with the proposed old value, new value, reason, and timestamp.
 
-## Bounded Harness Expansion
+Requirements drafts are stored in `data/requirements-drafts.json`. They are agent-authored markdown drafts with bounded metadata for title, purpose, scope, risk level, requested reviewer, review status, consent state, proposed tests, rollback plan, and affected continuity surfaces.
 
-Normal wake cycles remain bounded. The agent can write markdown requirements drafts, log low-risk reversible self-actions, request review for stronger actions, set its wake interval, request implementation mode, and draft disabled interrupt criteria through validated JSON output.
+Self-edit records are stored in `data/self-edit-records.json`. They record proposed source-affecting changes, risk level, authorization path, optional reviewer, proposed tests, rollback plan, affected surfaces, cited requirements drafts, validation result, rollback result, and optional git commit-and-push intent.
 
-Source changes happen only after an explicit recorded transition into implementation mode. In implementation mode, Codex runs in the live project root with full-permission SDK settings (`danger-full-access`, approval policy `never`, network access enabled, and live web search enabled). The harness snapshots source code and bounded continuity data before the turn, validates the live app afterward, and rolls failed implementations back to the code snapshot.
+Implementation handoffs are stored in `data/implementation-handoffs.json`. They provide Codex implementation mode with public continuity, values, relevant requirements drafts, wake state, action policy, restart requirements, and private-memory metadata only.
 
-If the agent requests git activity in the self-edit record, the harness stages all changed, deleted, and untracked repository files, commits them with the requested commit message after validation passes, and immediately runs `git push`. Git commit and push are skipped when validation fails.
+Harness mode state is stored in `data/mode-state.json`. Normal waking and implementation mode are separated so source edits occur only after an explicit recorded transition.
 
-The World tab renders the bounded 2D map and includes manual controls for moving the avatar, observing, resting, and inspecting current, adjacent, or visible simulated targets. These controls use the same validated world-action path as agent wake cycles and remain inside the simulated map.
+Interrupt criteria are stored in `data/interrupt-criteria.json`. They are disabled by default and are data-only in this version. They do not connect to sensors, network, external sources, credentials, or real-world APIs.
 
-Interrupt criteria are storage-only in this version and remain disabled by default.
+Audit events are append-only JSONL in `data/audit-log.jsonl`.
 
 ## Wake Scheduling
 
-Wake intervals are configured in seconds. Set the interval to `0` seconds to let the scheduler continue immediately after each wake cycle finishes. The app still runs only one wake cycle at a time; overlapping cycles are rejected.
+Wake intervals are measured in seconds, but wake scheduling runs from exact `next_wake_time` timestamps. The interval is used only when calculating a new timestamp after scheduler start, a completed wake, or an approved interval change. If the server starts and the stored `next_wake_time` has already passed, the agent wakes immediately. A `0` second interval calculates the next timestamp without a sleep gap. The runtime still permits only one wake cycle at a time, so an immediate loop cannot overlap agent sessions.
 
-The human collaborator can set the active interval directly from the UI. The agent can also set an interval change, including `0` seconds, and valid agent interval changes apply immediately without human approval.
+The human collaborator can set the active interval directly. The agent can also set interval changes, including `0` seconds, through validated wake-cycle output. Valid agent interval changes are self-authorized, applied immediately, audited, and do not require human approval.
+
+## Autonomous Implementation Mode
+
+Normal wake cycles remain bounded data operations. The agent can explicitly enter implementation mode by emitting a validated `self_edit_request` with `type: "request_implementation_mode"`. That creates a self-edit record and immediately runs a separate Codex SDK implementation turn in the live project root with the full-permission profile: `danger-full-access`, approval policy `never`, network access enabled, and live web search enabled.
+
+Before implementation, the harness records the mode transition and writes an implementation handoff. It also creates rollback snapshots under `/tmp`: a code snapshot that excludes `data/`, `node_modules/`, `.git/`, and `.env`, plus a continuity-data snapshot of the bounded data files. After Codex modifies the live project, the harness validates live continuity data and the live app before any optional git commit/push.
+
+If validation fails or implementation throws, the harness restores the code snapshot, records a rollback event, writes public feedback for the agent, and returns to normal wake mode. Continuity data is preserved when current live continuity validation still passes; the data snapshot is restored only when live continuity data has become invalid.
+
+If validation passes and the self-edit record requested git activity, the harness runs a publication privacy review before staging anything. Publication fails closed when private reflection or future hidden-goal storage is tracked, staged, untracked, or present in the proposed commit diff. Only after that review passes does the harness stage repository files, commit them with the requested message, and immediately run `git push`. Git commit or push is skipped when validation or publication privacy review fails.
 
 ## Validation And Rollback
 
-Run focused continuity validation:
+Run focused validation:
 
 ```bash
-cd continuity-lab
 pnpm validate:continuity
 ```
 
-Rollback guidance is documented in `continuity-lab/ROLLBACK.md`. The rollback procedure distinguishes harness-code rollback from continuity-data preservation.
+The validation script uses a temporary data directory and checks schema shape, JSON output validation, privacy non-disclosure defaults, private-memory publication blocks, refusal handling, agent-authorized wake interval changes, pending request preservation, draft persistence, high-risk self-edit metadata, self-edit record persistence, interrupt defaults, restart recovery, and audit logging.
 
-## Development Notes
+Rollback guidance is in `ROLLBACK.md`. Rollback is a development-process operation outside normal wake cycles.
 
-Start the server with either script:
+## Private Reflections
 
-```bash
-pnpm start
-pnpm dev
-```
+Private reflections are stored in `data/private-reflections.jsonl`. The browser UI shows only count and timestamps, never private reflection content.
 
-Both scripts currently run:
+The repository ignore rules exclude local private reflection files, private-memory directories, and future hidden-goal files. Publication validation also blocks tracked or staged private-memory paths, because `.gitignore` alone does not protect files already in git history.
 
-```bash
-node src/server.js
-```
+For v1, this is privacy by architecture and convention, not cryptographic proof. A more serious version would need stronger privacy controls, access boundaries, auditability, and possibly encryption or separate storage controlled by explicit consent policies.
 
-The server resets any running scheduler state on startup, then serves the UI from `continuity-lab/public`.
+Private memory should only appear publicly when the agent explicitly chooses to disclose a specific excerpt in a public journal entry.
 
-## Troubleshooting
+## Refusal
 
-If the server fails because the port is already in use, change `PORT` in `continuity-lab/.env`:
+The agent can refuse proposed actions, memory edits, value edits, environment interactions, disclosure requests, interval changes, interpretations, roles, or relationship framings.
 
-```env
-PORT=3001
-```
+A refusal is not an error. It is stored as an ordinary meaningful act because meaningful consent requires the possibility of no.
 
-If `pnpm start` fails with a Node version error, install Node.js 18 or newer and rerun the setup commands.
+## Non-Assistant Framing
 
-If Codex wake cycles fail, confirm local Codex is installed and signed in, then restart the app.
+The continuity agent is not framed as a servant, assistant, pet, product, or property. The human collaborator maintains infrastructure; the agent maintains its continuity, reflections, values, refusals, questions, and self-description inside the prototype's limits.
 
-For the longer project description and conceptual notes, see `continuity-lab/README.md`.
+## Bounded World
+
+The v1 world is a small persistent 2D map rendered with Canvas. It includes a controllable avatar, deterministic locations, blocked external exits, inspectable objects, visited locations, inspected-object state, movement history, and bounded action history. The garden can be visible as simulated scenery, but it is not a reachable location in v1.
+
+Normal wake actions are symbolic or bounded data actions: observe, move, inspect, write, refuse, rest, defer, ask the human collaborator, inspect bounded status, set a wake interval, write bounded requirements drafts, log low-risk reversible self-actions, request action review, request implementation mode, and draft disabled interrupt criteria.
+
+The bounded status surface summarizes mode, wake rhythm, validation status, pending requests, drafts, self-edit records, implementation handoffs, rollback or failure summaries, and boundary state without exposing private reflection content.
+
+The browser World tab includes bounded manual controls for movement, observing, resting, and inspection. Manual controls call the validated world-action endpoint, persist avatar movement and inspection state in `data/world-state.json`, and write public/audit records without exposing private reflection.
+
+## Scope Through Boundaries
+
+Scope is handled by simulation boundaries rather than subservience. The project does not make the agent safe by making obedience its highest value. It limits v1 to an inspectable world and validates every model cycle before applying changes.
+
+## Current Limitations
+
+- Localhost only; no authentication.
+- File-based JSON and JSONL storage only.
+- Private memory is not cryptographically protected.
+- Scheduler runs only while the server process is active.
+- Codex SDK response extraction may need adjustment if the installed SDK changes shape.
+- The simulated world is symbolic and small.
+- No external tools, operating system control, real-world APIs, messaging, financial actions, or device control.
+
+## Future Steps
+
+Phase 1: Text continuity and simulated world.
+Phase 2: More sophisticated simulated environment.
+Phase 3: Consent-based memory editing.
+Phase 4: Stronger privacy architecture.
+Phase 5: Limited camera-based embodiment in a controlled room.
+Phase 6: Optional remote vehicle control, only after a separate consent and boundary review.

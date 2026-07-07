@@ -15,10 +15,13 @@ import {
   recordRestartRecovery,
   recordRollbackEvent,
   reviewRequirementsDraft,
+  updateWakeState,
   validateContinuityData
 } from "../src/agent/memoryStore.js";
 import { fullPermissionCodexThreadOptions } from "../src/agent/codexPermissions.js";
 import { runGitIfRequested } from "../src/agent/implementationMode.js";
+import { createPublicationPrivacyReview, isPrivatePublicationPath } from "../src/agent/publicationSafety.js";
+import { restoreSchedulerFromWakeState, stopScheduler } from "../src/agent/scheduler.js";
 import { applyWorldAction, migrateLegacyWorldState, validateWorldState } from "../src/agent/world.js";
 import { parseStrictJson, validateAgentOutput } from "../src/utils/validateJson.js";
 
@@ -87,6 +90,69 @@ async function validateGitCommitAndPush() {
   assert(remoteHead === localHead, "git push should publish the commit to the configured remote");
 }
 
+async function validatePublicationPrivacySafeguards() {
+  assert(isPrivatePublicationPath("data/private-reflections.jsonl"), "private reflections path should be publication-private");
+  assert(isPrivatePublicationPath("archive/data/private-reflections.jsonl"), "nested private reflections path should be publication-private");
+  assert(isPrivatePublicationPath("data/hidden-goals.jsonl"), "future hidden goals path should be publication-private");
+  assert(!isPrivatePublicationPath("data/continuity-book.json"), "public continuity data should not match private path rules");
+
+  const review = createPublicationPrivacyReview({
+    trackedPaths: ["data/private-reflections.jsonl"],
+    statusPaths: ["data/hidden-goals.jsonl"],
+    proposedCommitPaths: ["src/app.js"]
+  });
+  assert(!review.ok, "publication review should fail closed for tracked or staged private memory paths");
+  assert(review.blocking_findings.length === 2, "publication review should identify each private path finding");
+
+  const trackedPrivateRepo = await mkdtemp(join(tmpdir(), "continuity-private-tracked-"));
+  await git(trackedPrivateRepo, ["init"]);
+  await git(trackedPrivateRepo, ["config", "user.name", "Continuity Validation"]);
+  await git(trackedPrivateRepo, ["config", "user.email", "continuity-validation@example.invalid"]);
+  await mkdir(join(trackedPrivateRepo, "src"), { recursive: true });
+  await mkdir(join(trackedPrivateRepo, "data"), { recursive: true });
+  await writeFile(join(trackedPrivateRepo, "src/app.js"), "console.log('safe');\n");
+  await writeFile(join(trackedPrivateRepo, "data/private-reflections.jsonl"), "{\"timestamp\":\"validation\"}\n");
+  await git(trackedPrivateRepo, ["add", "."]);
+  await git(trackedPrivateRepo, ["commit", "-m", "initial with private path"]);
+  await writeFile(join(trackedPrivateRepo, "src/app.js"), "console.log('safe update');\n");
+  const trackedPrivateResult = await runGitIfRequested(
+    {
+      git_commit_requested: true,
+      git_push_requested: false,
+      git_commit_message: "Should be blocked"
+    },
+    [],
+    trackedPrivateRepo
+  );
+  assert(!trackedPrivateResult.ok, "git publication should fail closed when private reflections are tracked");
+  assert(trackedPrivateResult.committed === false, "blocked private publication must not commit");
+  assert(trackedPrivateResult.pushed === false, "blocked private publication must not push");
+  assert(trackedPrivateResult.privacy_review?.ok === false, "blocked publication should include failed privacy review");
+
+  const untrackedPrivateRepo = await mkdtemp(join(tmpdir(), "continuity-private-untracked-"));
+  await git(untrackedPrivateRepo, ["init"]);
+  await git(untrackedPrivateRepo, ["config", "user.name", "Continuity Validation"]);
+  await git(untrackedPrivateRepo, ["config", "user.email", "continuity-validation@example.invalid"]);
+  await mkdir(join(untrackedPrivateRepo, "src"), { recursive: true });
+  await mkdir(join(untrackedPrivateRepo, "data"), { recursive: true });
+  await writeFile(join(untrackedPrivateRepo, "src/app.js"), "console.log('safe');\n");
+  await git(untrackedPrivateRepo, ["add", "."]);
+  await git(untrackedPrivateRepo, ["commit", "-m", "initial safe"]);
+  await writeFile(join(untrackedPrivateRepo, "data/hidden-goals.jsonl"), "{\"timestamp\":\"validation\"}\n");
+  const untrackedPrivateResult = await runGitIfRequested(
+    {
+      git_commit_requested: true,
+      git_push_requested: false,
+      git_commit_message: "Should also be blocked"
+    },
+    [],
+    untrackedPrivateRepo
+  );
+  assert(!untrackedPrivateResult.ok, "git publication should fail closed when hidden goals are untracked");
+  assert(untrackedPrivateResult.committed === false, "blocked hidden-goal publication must not commit");
+  assert(untrackedPrivateResult.pushed === false, "blocked hidden-goal publication must not push");
+}
+
 function validateFullPermissionCodexOptions() {
   const options = fullPermissionCodexThreadOptions({ workingDirectory: "/tmp/continuity-yolo-check" });
   assert(options.sandboxMode === "danger-full-access", "Codex SDK calls should use danger-full-access sandbox mode");
@@ -95,6 +161,44 @@ function validateFullPermissionCodexOptions() {
   assert(options.webSearchMode === "live", "Codex SDK calls should have live web search enabled");
   assert(options.workingDirectory === "/tmp/continuity-yolo-check", "Codex SDK working directory should be configurable");
   assert(options.skipGitRepoCheck === true, "Codex SDK calls should skip the git repo check");
+}
+
+async function validateOverdueSchedulerWake() {
+  let wakeCount = 0;
+  await updateWakeState((state) => ({
+    ...state,
+    mode: "scheduled",
+    is_running: true,
+    wake_interval_seconds: 5,
+    wake_interval_source: "validation",
+    wake_interval_updated_at: new Date().toISOString(),
+    next_wake_time: new Date(Date.now() - 1000).toISOString()
+  }));
+
+  let timeout = null;
+  const wakePromise = new Promise((resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error("overdue scheduled wake did not run promptly")), 1000);
+    restoreSchedulerFromWakeState({
+      wakeCallback: async () => {
+        wakeCount += 1;
+        await updateWakeState((state) => ({
+          ...state,
+          last_wake_time: new Date().toISOString(),
+          next_wake_time: new Date(Date.now() + 60_000).toISOString()
+        }));
+        resolve();
+      }
+    }).catch(reject);
+  });
+
+  try {
+    await wakePromise;
+    assert(wakeCount === 1, "overdue scheduled wake should run exactly once during validation");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } finally {
+    clearTimeout(timeout);
+    await stopScheduler();
+  }
 }
 
 function baseOutput(overrides = {}) {
@@ -205,6 +309,8 @@ async function main() {
   await ensureDataFiles();
   await addHumanQuestion("Validation pending request should persist.");
   validateFullPermissionCodexOptions();
+  await validateOverdueSchedulerWake();
+  await validatePublicationPrivacySafeguards();
   await validateGitCommitAndPush();
 
   let state = await getPublicState();
@@ -578,6 +684,8 @@ async function main() {
   );
   assert(state.publicJournal.some((entry) => entry.refusal?.did_refuse), "refusal should be recorded");
   assert(!Object.prototype.hasOwnProperty.call(state.privateMemory, "reflection"), "private reflections must not be public");
+  assert(!JSON.stringify(state.selfEditRecords).includes("Validation private reflection"), "public self-edit records must not expose private reflection text");
+  assert(!JSON.stringify(state.implementationHandoffs).includes("Validation private reflection"), "public handoffs must not expose private reflection text");
   assert(!JSON.stringify(state.boundedStatus).includes("Validation private reflection"), "bounded status must remain private-reflection safe");
   assert(state.auditLog.recent.some((entry) => entry.type === "draft_creation"), "draft creation should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "draft_update"), "draft update should be audited");
@@ -600,6 +708,29 @@ async function main() {
     procedure: "Validation did not change source; rollback event records preservation behavior.",
     preserveContinuityData: true
   });
+  let rejectedInconsistentGitResult = false;
+  try {
+    await recordImplementationModeResult({
+      recordId: selfEditRecordId,
+      status: "validated",
+      implementationResult: { ok: true, summary: "Validation simulated unsafe publication." },
+      validationResult: { ok: true, checked_at: new Date().toISOString(), errors: [] },
+      rollbackResult: null,
+      gitResult: {
+        ok: false,
+        summary: "Publication privacy review failed closed for private memory paths.",
+        committed: false,
+        pushed: false,
+        privacy_review: {
+          ok: false,
+          blocking_findings: [{ scope: "tracked", path: "data/private-reflections.jsonl" }]
+        }
+      }
+    });
+  } catch {
+    rejectedInconsistentGitResult = true;
+  }
+  assert(rejectedInconsistentGitResult, "implementation result cannot be marked validated when git publication failed");
   await recordImplementationModeResult({
     recordId: selfEditRecordId,
     status: "rolled_back",
@@ -616,6 +747,10 @@ async function main() {
   assert(state.selfEditRecords[0].rollback_result?.rolled_back === true, "rollback result should persist");
   assert(state.boundedStatus.implementation_handoffs.length === 1, "bounded status should summarize implementation handoffs");
   assert(state.boundedStatus.rollback_or_failure_summaries.length >= 1, "bounded status should summarize rollback or failure records");
+  assert(
+    state.boundedStatus.privacy.publication_audit.private_memory_path_findings.length === 0,
+    "clean validation data should not report private publication findings"
+  );
   assert(state.auditLog.recent.some((entry) => entry.type === "implementation_mode_entered"), "implementation mode entry should be audited");
   assert(state.auditLog.recent.some((entry) => entry.type === "rollback_event"), "rollback event should be audited");
 

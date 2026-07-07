@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { resolve } from "node:path";
 import { atomicWrite, atomicWriteJson } from "../utils/atomicWrite.js";
 import { addSecondsIso, makeId, nowIso } from "../utils/time.js";
+import { extractPorcelainPaths, privatePublicationPathInfo } from "./publicationSafety.js";
 import {
   applyWorldAction,
   createDefaultWorldState,
@@ -416,6 +417,275 @@ function handoffSummary(handoff) {
   };
 }
 
+function commandResultSummary(result) {
+  if (!isPlainObject(result)) {
+    return null;
+  }
+
+  return {
+    ok: result.ok === true,
+    command: result.command || null,
+    exit_code: result.exit_code ?? null
+  };
+}
+
+function validationResultSummary(validation) {
+  if (!isPlainObject(validation)) {
+    return validation === null ? null : { ok: false, error: "Validation result was not structured." };
+  }
+
+  return {
+    ok: validation.ok === true,
+    checked_at: validation.checked_at || null,
+    error_count: Array.isArray(validation.errors) ? validation.errors.length : 0,
+    errors: Array.isArray(validation.errors) ? validation.errors : [],
+    checks: Array.isArray(validation.checks) ? validation.checks.map(commandResultSummary).filter(Boolean) : undefined,
+    continuity_preservation: isPlainObject(validation.continuity_preservation)
+      ? {
+          checks: Array.isArray(validation.continuity_preservation.checks)
+            ? validation.continuity_preservation.checks.map((check) => ({
+                label: check.label,
+                ok: check.ok === true,
+                checked_at: check.checked_at || null,
+                error_count: Array.isArray(check.errors) ? check.errors.length : 0,
+                errors: Array.isArray(check.errors) ? check.errors : []
+              }))
+            : []
+        }
+      : undefined,
+    git_publication_result: isPlainObject(validation.git_publication_result)
+      ? gitResultSummary(validation.git_publication_result)
+      : undefined
+  };
+}
+
+function publicationPrivacyReviewSummary(review) {
+  if (!isPlainObject(review)) {
+    return null;
+  }
+
+  return {
+    ok: review.ok === true,
+    summary: review.summary || null,
+    checked_rules: Array.isArray(review.checked_rules) ? review.checked_rules : [],
+    blocking_findings: Array.isArray(review.blocking_findings) ? review.blocking_findings : [],
+    historical_findings: Array.isArray(review.historical_findings) ? review.historical_findings : [],
+    requires_history_remediation: review.requires_history_remediation === true
+  };
+}
+
+function gitResultSummary(gitResult) {
+  if (!isPlainObject(gitResult)) {
+    return gitResult === null ? null : { ok: false, summary: "Git result was not structured." };
+  }
+
+  return {
+    ok: gitResult.ok === true,
+    summary: gitResult.summary || null,
+    committed: gitResult.committed === true,
+    pushed: gitResult.pushed === true,
+    privacy_review: publicationPrivacyReviewSummary(gitResult.privacy_review),
+    pre_existing_repo_changes: Array.isArray(gitResult.pre_existing_repo_changes)
+      ? gitResult.pre_existing_repo_changes
+      : undefined,
+    commit: commandResultSummary(gitResult.commit),
+    push: commandResultSummary(gitResult.push),
+    add: commandResultSummary(gitResult.add)
+  };
+}
+
+function implementationResultSummary(implementationResult) {
+  if (!isPlainObject(implementationResult)) {
+    return implementationResult === null ? null : { ok: false, summary: "Implementation result was not structured." };
+  }
+
+  return {
+    ok: implementationResult.ok === true,
+    summary: implementationResult.summary || null,
+    error: implementationResult.error || null,
+    changed_files: Array.isArray(implementationResult.changed_files) ? implementationResult.changed_files : [],
+    source_diff_stat: implementationResult.source_diff_stat || null,
+    pre_existing_repo_changes: Array.isArray(implementationResult.pre_existing_repo_changes)
+      ? implementationResult.pre_existing_repo_changes
+      : [],
+    completed_at: implementationResult.completed_at || null,
+    usage: implementationResult.usage || null
+  };
+}
+
+function rollbackResultSummary(rollbackResult) {
+  if (!isPlainObject(rollbackResult)) {
+    return rollbackResult === null ? null : { rolled_back: false, error: "Rollback result was not structured." };
+  }
+
+  return {
+    rolled_back: rollbackResult.rolled_back === true,
+    error: rollbackResult.error || null,
+    data_restoration: isPlainObject(rollbackResult.data_restoration)
+      ? {
+          restored: rollbackResult.data_restoration.restored === true,
+          reason: rollbackResult.data_restoration.reason || null
+        }
+      : undefined,
+    validation_after_rollback: validationResultSummary(rollbackResult.validation_after_rollback)
+  };
+}
+
+function publicSelfEditRecord(record) {
+  return {
+    id: record.id,
+    created_at: record.created_at,
+    updated_at: record.updated_at || null,
+    created_by: record.created_by || null,
+    status: record.status,
+    request_type: record.request_type,
+    title: record.title,
+    purpose: record.purpose,
+    scope: record.scope,
+    risk_level: record.risk_level,
+    authorization_path: record.authorization_path,
+    optional_reviewer: record.optional_reviewer || null,
+    tests_proposed: Array.isArray(record.tests_proposed) ? record.tests_proposed : [],
+    rollback_plan: record.rollback_plan,
+    affected_continuity_surfaces: Array.isArray(record.affected_continuity_surfaces)
+      ? record.affected_continuity_surfaces
+      : [],
+    requirements_draft_ids: Array.isArray(record.requirements_draft_ids) ? record.requirements_draft_ids : [],
+    git_commit_requested: record.git_commit_requested === true,
+    git_push_requested: record.git_push_requested === true,
+    git_commit_message: record.git_commit_message || null,
+    reason: record.reason || null,
+    audit_entry_id: record.audit_entry_id || null,
+    implementation_handoff_id: record.implementation_handoff_id || null,
+    implementation_started_at: record.implementation_started_at || null,
+    implementation_finished_at: record.implementation_finished_at || null,
+    implementation_result: implementationResultSummary(record.implementation_result),
+    post_change_validation_result: validationResultSummary(record.post_change_validation_result),
+    rollback_result: rollbackResultSummary(record.rollback_result),
+    git_result: gitResultSummary(record.git_result)
+  };
+}
+
+function publicImplementationHandoff(handoff) {
+  return {
+    id: handoff.id,
+    created_at: handoff.created_at,
+    self_edit_record_id: handoff.self_edit_record_id,
+    requirements_draft_ids: Array.isArray(handoff.requirementsDrafts)
+      ? handoff.requirementsDrafts.map((draft) => draft.id).filter(Boolean)
+      : [],
+    wakeState: handoff.wakeState || null,
+    restart_requirements: handoff.restart_requirements || null,
+    privacy_constraints: handoff.privacy_constraints || null,
+    normal_wake_constraints: handoff.normal_wake_constraints || null,
+    privateMemory: handoff.privateMemory || null
+  };
+}
+
+function publicRestartSnapshot(restartSnapshot) {
+  if (!isPlainObject(restartSnapshot) || !isPlainObject(restartSnapshot.snapshot)) {
+    return restartSnapshot;
+  }
+
+  const snapshot = restartSnapshot.snapshot;
+  return {
+    snapshot: {
+      ...snapshot,
+      validation: validationResultSummary(snapshot.validation),
+      recovery_validation: validationResultSummary(snapshot.recovery_validation),
+      selfEditRecords: Array.isArray(snapshot.selfEditRecords) ? snapshot.selfEditRecords.map(publicSelfEditRecord) : [],
+      implementationHandoffs: Array.isArray(snapshot.implementationHandoffs)
+        ? snapshot.implementationHandoffs.map(publicImplementationHandoff)
+        : []
+    }
+  };
+}
+
+function candidatePathsFromGitValue(value) {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  const porcelainPaths = extractPorcelainPaths(value);
+  return porcelainPaths.length > 0 ? porcelainPaths : [value.trim()].filter(Boolean);
+}
+
+function addPrivatePathAuditFindings(findings, record, scope, values) {
+  for (const value of values || []) {
+    for (const candidate of candidatePathsFromGitValue(value)) {
+      const info = privatePublicationPathInfo(candidate);
+      if (info) {
+        findings.push({
+          self_edit_record_id: record.id,
+          scope,
+          path: info.path,
+          matched_rule: info.matched_rule
+        });
+      }
+    }
+  }
+}
+
+function buildPublicationAudit(selfEditRecords) {
+  const records = Array.isArray(selfEditRecords) ? selfEditRecords : [];
+  const gitRecords = records.filter((record) => isPlainObject(record.git_result));
+  const latestPublicationRecord = [...gitRecords]
+    .reverse()
+    .find((record) => record.git_result?.committed === true || record.git_result?.pushed === true);
+  const findings = [];
+
+  for (const record of gitRecords) {
+    addPrivatePathAuditFindings(findings, record, "git_pre_existing_repo_changes", record.git_result?.pre_existing_repo_changes);
+    addPrivatePathAuditFindings(
+      findings,
+      record,
+      "implementation_pre_existing_repo_changes",
+      record.implementation_result?.pre_existing_repo_changes
+    );
+    addPrivatePathAuditFindings(findings, record, "implementation_changed_files", record.implementation_result?.changed_files);
+
+    for (const finding of record.git_result?.privacy_review?.blocking_findings || []) {
+      if (finding?.path) {
+        addPrivatePathAuditFindings(findings, record, "privacy_review_blocking", [finding.path]);
+      }
+    }
+    for (const finding of record.git_result?.privacy_review?.historical_findings || []) {
+      if (finding?.path) {
+        addPrivatePathAuditFindings(findings, record, "privacy_review_history", [finding.path]);
+      }
+    }
+  }
+
+  const uniqueFindings = [];
+  const seen = new Set();
+  for (const finding of findings) {
+    const key = `${finding.self_edit_record_id}:${finding.scope}:${finding.path}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueFindings.push(finding);
+    }
+  }
+
+  return {
+    latest_git_publication: latestPublicationRecord
+      ? {
+          self_edit_record_id: latestPublicationRecord.id,
+          status: latestPublicationRecord.status,
+          git_ok: latestPublicationRecord.git_result?.ok === true,
+          committed: latestPublicationRecord.git_result?.committed === true,
+          pushed: latestPublicationRecord.git_result?.pushed === true,
+          summary: latestPublicationRecord.git_result?.summary || null
+        }
+      : null,
+    private_memory_path_findings: uniqueFindings.slice(-20),
+    requires_review: uniqueFindings.length > 0,
+    note:
+      uniqueFindings.length > 0
+        ? "Path-only audit found private-memory publication risk; private reflection content remains undisclosed."
+        : "Path-only audit found no private-memory paths in recorded git publication metadata."
+  };
+}
+
 function boundedValidationSummary(validation) {
   return {
     ok: validation.ok,
@@ -477,7 +747,8 @@ function buildBoundedStatusSurface({
     },
     privacy: {
       private_reflection_content_exposed: false,
-      private_memory_surface: "metadata_only"
+      private_memory_surface: "metadata_only",
+      publication_audit: buildPublicationAudit(selfEditRecords)
     },
     boundaries: {
       normal_wake_source_code_access: "implementation_mode_only",
@@ -642,8 +913,8 @@ export async function loadCycleState() {
     wakeState,
     pendingRequests,
     requirementsDrafts,
-    selfEditRecords,
-    implementationHandoffs,
+    selfEditRecords: selfEditRecords.map(publicSelfEditRecord),
+    implementationHandoffs: implementationHandoffs.map(publicImplementationHandoff),
     modeState,
     interruptCriteria,
     actionPolicy,
@@ -875,6 +1146,14 @@ function validateImplementationHandoff(handoff, index, errors) {
   if (!isPlainObject(handoff.privacy_constraints)) {
     errors.push(`${path}.privacy_constraints must be an object`);
   }
+}
+
+function gitResultHasFailedPrivacyReview(gitResult) {
+  return gitResult?.privacy_review?.ok === false;
+}
+
+function gitResultClaimsPublication(gitResult) {
+  return gitResult?.committed === true || gitResult?.pushed === true || /committed|pushed/i.test(gitResult?.summary || "");
 }
 
 export async function validateContinuityData() {
@@ -1368,6 +1647,16 @@ export async function recordImplementationModeResult({
     error.status = 422;
     throw error;
   }
+  if (nextStatus === "validated" && gitResult?.ok === false) {
+    const error = new Error("Implementation cannot be marked validated when git publication failed.");
+    error.status = 422;
+    throw error;
+  }
+  if (gitResultHasFailedPrivacyReview(gitResult) && gitResultClaimsPublication(gitResult)) {
+    const error = new Error("Git result cannot claim commit or push after publication privacy review failed closed.");
+    error.status = 422;
+    throw error;
+  }
   const nextRecord = {
     ...record,
     status: nextStatus,
@@ -1490,12 +1779,12 @@ export async function getPublicState(extra = {}) {
     wakeState,
     pendingRequests,
     requirementsDrafts,
-    selfEditRecords,
-    implementationHandoffs,
+    selfEditRecords: selfEditRecords.map(publicSelfEditRecord),
+    implementationHandoffs: implementationHandoffs.map(publicImplementationHandoff),
     modeState,
     interruptCriteria,
     actionPolicy,
-    restartSnapshot,
+    restartSnapshot: publicRestartSnapshot(restartSnapshot),
     publicJournal,
     privateMemory,
     boundedStatus,
@@ -2414,6 +2703,9 @@ export async function approveWakeInterval(secondsFromBody = null) {
   wakeState.wake_interval_source = "agent_request";
   wakeState.wake_interval_updated_at = timestamp;
   wakeState.pending_requested_wake_interval_seconds = null;
+  if (wakeState.is_running) {
+    wakeState.next_wake_time = addSecondsIso(timestamp, Math.round(requestedSeconds));
+  }
 
   for (const request of pendingRequests) {
     if (request.type === "wake_interval_change" && request.status === "pending") {

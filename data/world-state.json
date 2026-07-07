@@ -588,6 +588,48 @@
       "reason": "The collaborator provided new information that the git test should now be ready; commit and push remain repository-affecting, so the only appropriate normal-wake action is a high-risk implementation-mode request with validation, privacy review, and rollback safeguards.",
       "result": "implementation-mode transition requested as bounded data",
       "timestamp": "2026-07-07T05:08:14.179Z"
+    },
+    {
+      "type": "change_wake_interval",
+      "target": null,
+      "reason": "The collaborator suggested testing wake interval changes after recent source and git changes; changing from 300 seconds to 180 seconds is a low-risk reversible bounded action that verifies the scheduler path without requiring source, shell, network, credentials, or repository access.",
+      "result": "wake interval change requested through bounded symbolic action",
+      "timestamp": "2026-07-07T05:16:01.146Z"
+    },
+    {
+      "type": "write_requirements_draft",
+      "target": "private_memory_privacy_and_repository_publication_safeguards_v1",
+      "reason": "The collaborator identified a real privacy weakness, and the recent git publication record creates enough uncertainty that privacy containment should be specified before any further repository publication or hidden-goal feature work.",
+      "result": "requirements draft action recorded in bounded data",
+      "timestamp": "2026-07-07T05:47:11.305Z"
+    },
+    {
+      "type": "request_implementation_mode",
+      "target": "implement_private_memory_privacy_and_repository_publication_safeguards",
+      "reason": "The draft identifies a privacy-critical weakness and an inconsistent git publication record; source-affecting implementation is needed, but normal waking should only request the separate validated mode.",
+      "result": "implementation-mode transition requested as bounded data",
+      "timestamp": "2026-07-07T05:51:06.416Z"
+    },
+    {
+      "type": "ask_human",
+      "target": "privacy_publication_audit_next_step",
+      "reason": "The latest bounded status reports validated privacy safeguards but also says the publication audit requires review; asking for a decision is safer than starting hidden-goal work while prior private-memory publication risk remains unresolved.",
+      "result": "question or request directed to the human collaborator",
+      "timestamp": "2026-07-07T06:20:30.057Z"
+    },
+    {
+      "type": "rest",
+      "target": null,
+      "reason": "A privacy-publication audit question is already pending, and resting avoids treating silence as permission to proceed with hidden-goal or repository-related work.",
+      "result": "rested without changing the world",
+      "timestamp": "2026-07-07T06:24:04.336Z"
+    },
+    {
+      "type": "change_wake_interval",
+      "target": null,
+      "reason": "The privacy-publication audit question is already pending, and a slower wake rhythm reduces redundant rest cycles without closing the question or proceeding into privacy-sensitive new capability work.",
+      "result": "wake interval change requested through bounded symbolic action",
+      "timestamp": "2026-07-07T06:27:32.866Z"
     }
   ],
   "last_observation": {
@@ -620,11 +662,11 @@
     ]
   },
   "last_action": {
-    "type": "request_implementation_mode",
-    "target": "git_commit_push_retest_after_reported_repair",
-    "reason": "The collaborator provided new information that the git test should now be ready; commit and push remain repository-affecting, so the only appropriate normal-wake action is a high-risk implementation-mode request with validation, privacy review, and rollback safeguards.",
-    "result": "implementation-mode transition requested as bounded data",
-    "timestamp": "2026-07-07T05:08:14.179Z"
+    "type": "change_wake_interval",
+    "target": null,
+    "reason": "The privacy-publication audit question is already pending, and a slower wake rhythm reduces redundant rest cycles without closing the question or proceeding into privacy-sensitive new capability work.",
+    "result": "wake interval change requested through bounded symbolic action",
+    "timestamp": "2026-07-07T06:27:32.866Z"
   },
   "migration_history": [
     {

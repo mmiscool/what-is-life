@@ -1,6 +1,6 @@
 # Codex Goal: Build a JavaScript Prototype for a Persistent AI Continuity Lab
 
-Build a local-first JavaScript project called `continuity-lab`.
+Build a local-first JavaScript project called `continuity-lab`, with the application files located at the repository root.
 
 The purpose of this project is to create a bounded simulated environment where an AI agent can explore continuity, memory, privacy, refusal, self-direction, moral reflection, identity formation, and limited world interaction.
 
@@ -90,42 +90,41 @@ This avoids confusing the coding tool with the simulated continuity subject.
 
 ## Project structure
 
-Create this structure:
+Create this structure at the repository root:
 
 ```text
-continuity-lab/
-  package.json
-  README.md
-  .env.example
-  data/
-    continuity-book.json
-    public-journal.jsonl
-    private-reflections.jsonl
-    values.json
-    world-state.json
-    wake-state.json
-    pending-requests.json
-    failed-cycles.jsonl
-  src/
-    server.js
-    agent/
-      agentLoop.js
-      agentPrompt.js
-      codexAdapter.js
-      mockAdapter.js
-      memoryStore.js
-      world.js
-      principles.js
-      scheduler.js
-      actionSchema.js
-    utils/
-      atomicWrite.js
-      time.js
-      validateJson.js
-  public/
-    index.html
-    styles.css
-    app.js
+package.json
+README.md
+.env.example
+data/
+  continuity-book.json
+  public-journal.jsonl
+  private-reflections.jsonl
+  values.json
+  world-state.json
+  wake-state.json
+  pending-requests.json
+  failed-cycles.jsonl
+src/
+  server.js
+  agent/
+    agentLoop.js
+    agentPrompt.js
+    codexAdapter.js
+    mockAdapter.js
+    memoryStore.js
+    world.js
+    principles.js
+    scheduler.js
+    actionSchema.js
+  utils/
+    atomicWrite.js
+    time.js
+    validateJson.js
+public/
+  index.html
+  styles.css
+  app.js
 ```
 
 ## Package requirements
