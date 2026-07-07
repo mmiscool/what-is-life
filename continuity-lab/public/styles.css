@@ -73,43 +73,53 @@ label {
   font-size: 0.86rem;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 18px 24px;
+  gap: 14px;
+  min-height: 50px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--line);
-  background: #141512;
+  background: #121310;
   position: sticky;
   top: 0;
   z-index: 4;
 }
 
-.topbar h1 {
-  margin: 0;
-  font-size: clamp(1.35rem, 2vw, 2rem);
-  font-weight: 700;
-}
-
-.topbar p {
-  margin: 4px 0 0;
+.runtime-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .status-line {
   max-width: 48ch;
   color: var(--green);
-  font-size: 0.92rem;
   text-align: right;
 }
 
 .tabs {
   display: flex;
   gap: 8px;
-  padding: 10px 16px 0;
-  border-bottom: 1px solid var(--line);
-  background: #121310;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
   overflow-x: auto;
 }
 
@@ -117,7 +127,7 @@ label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 38px;
+  min-height: 42px;
   border-color: transparent;
   border-bottom-color: var(--line);
   border-radius: 6px 6px 0 0;
@@ -169,6 +179,17 @@ label {
   grid-template-columns: minmax(420px, 1fr);
 }
 
+.tab-panel[data-tab-panel="journal"] {
+  grid-template-columns: minmax(360px, 1.2fr) minmax(320px, 0.8fr);
+}
+
+.journal-side {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -210,11 +231,64 @@ label {
 
 #worldCanvas {
   display: block;
-  width: 100%;
+  width: min(100%, 960px);
   aspect-ratio: 48 / 31;
+  margin: 0 auto;
   border: 1px solid #30332d;
   border-radius: 6px;
   background: #0c0d0c;
+}
+
+.world-controls {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 12px;
+  width: min(100%, 960px);
+  margin: 12px auto 0;
+  align-items: stretch;
+}
+
+.direction-pad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, 42px);
+  gap: 6px;
+}
+
+.direction-pad button {
+  width: 100%;
+  min-height: 42px;
+}
+
+.direction-pad [data-world-move="north"] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.direction-pad [data-world-move="west"] {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.direction-pad [data-world-move="east"] {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.direction-pad [data-world-move="south"] {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.inspect-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(86px, 120px));
+  gap: 8px;
+  align-items: end;
+}
+
+.inspect-controls button {
+  width: 100%;
 }
 
 .world-details {
@@ -270,6 +344,16 @@ pre {
   overflow-wrap: anywhere;
 }
 
+details {
+  margin-top: 10px;
+}
+
+summary {
+  cursor: pointer;
+  color: var(--green);
+  font-size: 0.9rem;
+}
+
 .meta {
   color: var(--muted);
   font-size: 0.78rem;
@@ -303,6 +387,22 @@ pre {
 .form-stack {
   display: grid;
   gap: 10px;
+}
+
+.collaboration-options {
+  grid-column: 1 / -1;
+}
+
+.toggle-row {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.toggle-row input {
+  width: auto;
 }
 
 .request-actions {
@@ -348,13 +448,23 @@ pre {
   .tab-panel {
     grid-template-columns: 1fr 1fr;
   }
+
+  .tab-panel[data-tab-panel="journal"] {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
   .topbar {
     position: static;
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
+    gap: 4px;
+    padding: 6px 10px;
+  }
+
+  .runtime-meta {
+    justify-content: space-between;
   }
 
   .status-line {
@@ -369,8 +479,21 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .tab-panel[data-tab-panel="world"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .control-grid {
     grid-template-columns: 1fr;
+  }
+
+  .world-controls,
+  .inspect-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .direction-pad {
+    max-width: 280px;
   }
 
   .draft-review {

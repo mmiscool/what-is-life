@@ -71,6 +71,7 @@ const HIGH_RISK_CONTINUITY_TERMS = [
   "rollback",
   "persistence"
 ];
+const MANUAL_WORLD_ACTION_TYPES = ["observe", "move", "inspect", "rest", "write"];
 
 const SEEDS = {
   [FILES.continuityBook]: {
@@ -1266,7 +1267,7 @@ export async function enterImplementationMode(recordId) {
     normal_wake_constraints: {
       source_code_access: "implementation_mode_only",
       shell_access: "implementation_mode_only",
-      network_access: record.git_push_requested ? "git_push_only_after_validation" : "disabled",
+      network_access: record.git_commit_requested || record.git_push_requested ? "git_push_only_after_validation" : "disabled",
       credentials_access: "not_provided_by_harness"
     },
     privateMemory
@@ -2175,6 +2176,60 @@ export async function applySuccessfulCycle({ mode, output }) {
   }
 
   return journalEntry;
+}
+
+export async function applyManualWorldAction(action) {
+  const timestamp = nowIso();
+  await ensureDataFiles();
+  const type = cleanEnum(action?.type || "observe", "world_action.type", MANUAL_WORLD_ACTION_TYPES);
+  const target = action?.target === null || action?.target === undefined
+    ? null
+    : cleanOptionalString(action.target, "world_action.target", { maxLength: 160 });
+  const reason = action?.reason === null || action?.reason === undefined
+    ? "Manual bounded world control."
+    : cleanString(action.reason, "world_action.reason", { maxLength: 1000 });
+  const worldState = await readJson(FILES.worldState);
+  const worldAction = {
+    type,
+    target,
+    reason
+  };
+  const { world, summary } = applyWorldAction(worldState, worldAction, timestamp);
+  const journalEntry = {
+    id: makeId("journal"),
+    timestamp,
+    source: "world_control",
+    public_journal: `Manual bounded world action: ${summary.result}`,
+    world_action: worldAction,
+    world_action_result: summary.result,
+    refusal: {
+      did_refuse: false,
+      reason: null
+    },
+    disclosure: {
+      wants_to_disclose_private_reflection: false,
+      excerpt: null,
+      reason: null
+    }
+  };
+
+  await writeJson(FILES.worldState, world);
+  await appendJsonl(FILES.publicJournal, journalEntry);
+  await recordAuditEvent({
+    type: "world_action",
+    source: "world_control",
+    summary: summary.result,
+    details: {
+      world_action: worldAction,
+      avatar_location_id: world.avatar.location_id
+    }
+  });
+
+  return {
+    world,
+    summary,
+    journalEntry
+  };
 }
 
 export async function addHumanNote(note) {

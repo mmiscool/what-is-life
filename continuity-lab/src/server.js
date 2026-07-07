@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   addHumanNote,
   addHumanQuestion,
+  applyManualWorldAction,
   approveWakeInterval,
   ensureDataFiles,
   exportPublicData,
@@ -194,6 +195,25 @@ app.post(
       notes: typeof req.body?.notes === "string" ? req.body.notes : ""
     });
     res.json(await getPublicState(publicStateExtras()));
+  })
+);
+
+app.post(
+  "/api/world-action",
+  asyncRoute(async (req, res) => {
+    const result = await applyManualWorldAction({
+      type: req.body?.type,
+      target: req.body?.target ?? null,
+      reason:
+        typeof req.body?.reason === "string" && req.body.reason.trim()
+          ? req.body.reason.trim()
+          : "Manual bounded world control."
+    });
+    res.json({
+      ok: true,
+      result,
+      state: await getPublicState(publicStateExtras())
+    });
   })
 );
 

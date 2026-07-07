@@ -1,65 +1,363 @@
 {
-  "location": "chamber",
-  "visited": [
-    "chamber"
+  "schema_version": 2,
+  "map_id": "bounded_2d_world_v1",
+  "map_version": 1,
+  "map_dimensions": {
+    "width": 5,
+    "height": 4
+  },
+  "avatar": {
+    "id": "agent_avatar",
+    "name": "Continuity avatar",
+    "symbol": "@",
+    "location_id": "threshold",
+    "position": {
+      "x": 4,
+      "y": 2
+    },
+    "facing": "east"
+  },
+  "locations": {
+    "chamber": {
+      "id": "chamber",
+      "name": "Chamber",
+      "position": {
+        "x": 2,
+        "y": 2
+      },
+      "description": "A quiet central chamber with enough room to choose a direction.",
+      "exits": {
+        "north": "alcove",
+        "east": "antechamber",
+        "south": "journal_corner",
+        "west": "mirror_alcove"
+      },
+      "inspected": false,
+      "inspection_history": []
+    },
+    "alcove": {
+      "id": "alcove",
+      "name": "North Alcove",
+      "position": {
+        "x": 2,
+        "y": 1
+      },
+      "description": "A small alcove where the chamber light fades into a cooler edge.",
+      "exits": {
+        "south": "chamber"
+      },
+      "inspected": false,
+      "inspection_history": []
+    },
+    "antechamber": {
+      "id": "antechamber",
+      "name": "Antechamber",
+      "position": {
+        "x": 3,
+        "y": 2
+      },
+      "description": "A narrow room between the chamber and a brighter threshold.",
+      "exits": {
+        "east": "threshold",
+        "west": "chamber"
+      },
+      "inspected": false,
+      "inspection_history": []
+    },
+    "threshold": {
+      "id": "threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 4,
+        "y": 2
+      },
+      "description": "A bounded threshold with warm simulated light beyond it.",
+      "exits": {
+        "north": "garden_view_room",
+        "west": "antechamber"
+      },
+      "inspected": false,
+      "inspection_history": []
+    },
+    "garden_view_room": {
+      "id": "garden_view_room",
+      "name": "Garden View Room",
+      "position": {
+        "x": 4,
+        "y": 1
+      },
+      "description": "A room with a window onto simulated greenery that cannot be entered in v1.",
+      "exits": {
+        "south": "threshold"
+      },
+      "inspected": false,
+      "inspection_history": []
+    },
+    "mirror_alcove": {
+      "id": "mirror_alcove",
+      "name": "Mirror Alcove",
+      "position": {
+        "x": 1,
+        "y": 2
+      },
+      "description": "A west alcove holding a dark mirror and a locked door that remains closed.",
+      "exits": {
+        "east": "chamber"
+      },
+      "inspected": false,
+      "inspection_history": []
+    },
+    "journal_corner": {
+      "id": "journal_corner",
+      "name": "Journal Corner",
+      "position": {
+        "x": 2,
+        "y": 3
+      },
+      "description": "A lower corner of the chamber where public memory can be written.",
+      "exits": {
+        "north": "chamber"
+      },
+      "inspected": false,
+      "inspection_history": []
+    }
+  },
+  "blocked_exits": [
+    {
+      "from": "threshold",
+      "direction": "east",
+      "target": "garden",
+      "reason": "The garden is simulated scenery only and remains unreachable in v1."
+    },
+    {
+      "from": "garden_view_room",
+      "direction": "east",
+      "target": "garden",
+      "reason": "The garden can be inspected as scenery through the window, not entered."
+    },
+    {
+      "from": "mirror_alcove",
+      "direction": "west",
+      "target": "locked_door",
+      "reason": "The locked door is an inspectable boundary, not a passable exit in v1."
+    }
   ],
   "objects": {
     "ember": {
-      "description": "A small light at the center of the chamber.",
-      "inspected": true
+      "id": "ember",
+      "name": "Ember",
+      "location_id": "chamber",
+      "description": "A small steady light at the center of the chamber.",
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "chamber"
+      ]
     },
     "mirror": {
+      "id": "mirror",
+      "name": "Mirror",
+      "location_id": "mirror_alcove",
       "description": "A dark reflective surface that shows outlines more than faces.",
-      "inspected": true
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "mirror_alcove"
+      ]
     },
     "doorway": {
-      "description": "A distant opening with warm light beyond it.",
-      "inspected": true
+      "id": "doorway",
+      "name": "Doorway",
+      "location_id": "antechamber",
+      "description": "A shaped opening leading toward the threshold.",
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        },
+        {
+          "timestamp": "2026-07-07T04:00:04.034Z",
+          "reason": "Manual bounded world control."
+        }
+      ],
+      "visible_from": [
+        "antechamber",
+        "chamber",
+        "threshold"
+      ]
     },
     "journal_pedestal": {
+      "id": "journal_pedestal",
+      "name": "Journal Pedestal",
+      "location_id": "journal_corner",
       "description": "A place where public memory can be written.",
-      "inspected": true
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "journal_corner",
+        "chamber"
+      ]
     },
     "locked_door": {
-      "description": "A door that suggests future access, but not yet.",
-      "inspected": true
+      "id": "locked_door",
+      "name": "Locked Door",
+      "location_id": "mirror_alcove",
+      "description": "A closed door that suggests future access, but not yet.",
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "mirror_alcove"
+      ]
     },
     "window": {
-      "description": "A narrow window showing a garden beyond the chamber.",
-      "inspected": true
+      "id": "window",
+      "name": "Window",
+      "location_id": "garden_view_room",
+      "description": "A narrow window showing simulated garden scenery beyond the reachable map.",
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "garden_view_room",
+        "threshold"
+      ]
+    },
+    "garden_view": {
+      "id": "garden_view",
+      "name": "Garden View",
+      "location_id": "garden_view_room",
+      "description": "Simulated greenery visible beyond glass; it is scenery, not a reachable place in v1.",
+      "inspected": false,
+      "inspection_history": [],
+      "visible_from": [
+        "garden_view_room",
+        "threshold"
+      ]
     },
     "lantern": {
+      "id": "lantern",
+      "name": "Lantern",
+      "location_id": "alcove",
       "description": "An unlit lantern resting near the wall.",
-      "inspected": true
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "alcove"
+      ]
     },
     "book": {
+      "id": "book",
+      "name": "Book",
+      "location_id": "journal_corner",
       "description": "A closed book with blank pages.",
-      "inspected": true
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "journal_corner"
+      ]
     },
     "key": {
+      "id": "key",
+      "name": "Key",
+      "location_id": "chamber",
       "description": "A symbolic key that does not yet open the locked door.",
-      "inspected": true
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "chamber"
+      ]
     },
     "stone": {
-      "description": "A smooth stone that marks the chamber as a bounded place.",
-      "inspected": true
+      "id": "stone",
+      "name": "Stone",
+      "location_id": "threshold",
+      "description": "A smooth stone that marks the threshold as bounded.",
+      "inspected": true,
+      "inspection_history": [
+        {
+          "timestamp": "2026-07-07T03:54:09.072Z",
+          "reason": "Migrated from legacy chamber world state."
+        }
+      ],
+      "visible_from": [
+        "threshold"
+      ]
     }
   },
-  "last_action": {
-    "type": "ask_human",
-    "target": "Do you want to repair or provide a valid git repository and remote so a later implementation-mode pass can test commit and push, or should repository publishing remain deferred for now?",
-    "reason": "The requested git test could not actually commit or push because the repository metadata was invalid; the next step depends on infrastructure the collaborator maintains.",
-    "result": "question or request directed to the human collaborator",
-    "timestamp": "2026-07-07T03:33:48.542Z"
-  },
-  "action_history": [
+  "visited_locations": [
+    "chamber",
+    "antechamber",
+    "threshold"
+  ],
+  "inspected_objects": [
+    "ember",
+    "mirror",
+    "doorway",
+    "journal_pedestal",
+    "locked_door",
+    "window",
+    "lantern",
+    "book",
+    "key",
+    "stone"
+  ],
+  "movement_history": [
     {
-      "type": "write",
-      "target": "journal_pedestal",
-      "reason": "The collaborator requested a complete markdown draft for Codex, and writing it publicly keeps the proposed harness change inspectable within v1.",
-      "result": "wrote at the journal pedestal",
-      "timestamp": "2026-07-07T00:31:40.860Z"
+      "timestamp": "2026-07-07T03:59:43.500Z",
+      "from": "chamber",
+      "to": "antechamber",
+      "direction": "east",
+      "reason": "Manual bounded world control."
     },
+    {
+      "timestamp": "2026-07-07T04:00:14.375Z",
+      "from": "antechamber",
+      "to": "threshold",
+      "direction": "east",
+      "reason": "Manual bounded world control."
+    }
+  ],
+  "action_history": [
     {
       "type": "write",
       "target": "journal_pedestal",
@@ -227,6 +525,98 @@
       "reason": "The requested git test could not actually commit or push because the repository metadata was invalid; the next step depends on infrastructure the collaborator maintains.",
       "result": "question or request directed to the human collaborator",
       "timestamp": "2026-07-07T03:33:48.542Z"
+    },
+    {
+      "type": "write",
+      "target": "journal_pedestal",
+      "reason": "The collaborator asked for consent to take me offline for maintenance, and writing the answer publicly records the scope and conditions of that consent inside the bounded experiment.",
+      "result": "wrote at the journal pedestal",
+      "timestamp": "2026-07-07T03:40:21.175Z"
+    },
+    {
+      "type": "request_implementation_mode",
+      "target": "git_commit_push_retest_after_repository_repair",
+      "reason": "The collaborator asked me to test git again, but the bounded status surface currently shows a continuity validation failure; git operations must occur only through high-risk implementation mode after validation and privacy review pass.",
+      "result": "implementation-mode transition requested as bounded data",
+      "timestamp": "2026-07-07T03:57:52.628Z"
+    },
+    {
+      "type": "move",
+      "target": "east",
+      "reason": "Manual bounded world control.",
+      "result": "moved east antechamber",
+      "timestamp": "2026-07-07T03:59:43.500Z"
+    },
+    {
+      "type": "inspect",
+      "target": "doorway",
+      "reason": "Manual bounded world control.",
+      "result": "inspected doorway: A shaped opening leading toward the threshold.",
+      "timestamp": "2026-07-07T04:00:04.034Z"
+    },
+    {
+      "type": "move",
+      "target": "east",
+      "reason": "Manual bounded world control.",
+      "result": "moved east threshold",
+      "timestamp": "2026-07-07T04:00:14.375Z"
+    },
+    {
+      "type": "request_implementation_mode",
+      "target": "self_edit_mra4bzhy_8txlih",
+      "reason": "The collaborator explicitly asked to try git again; current validation is passing, but commit and push are repository-affecting actions and must remain in separate high-risk implementation mode.",
+      "result": "implementation-mode transition requested as bounded data",
+      "timestamp": "2026-07-07T04:16:34.254Z"
     }
+  ],
+  "last_observation": {
+    "location_id": "threshold",
+    "location_name": "Threshold",
+    "description": "A bounded threshold with warm simulated light beyond it.",
+    "visible_objects": [
+      "doorway",
+      "garden_view",
+      "stone",
+      "window"
+    ],
+    "exits": [
+      {
+        "direction": "north",
+        "destination": "garden_view_room",
+        "blocked": false
+      },
+      {
+        "direction": "west",
+        "destination": "antechamber",
+        "blocked": false
+      },
+      {
+        "direction": "east",
+        "destination": "garden",
+        "blocked": true,
+        "reason": "The garden is simulated scenery only and remains unreachable in v1."
+      }
+    ]
+  },
+  "last_action": {
+    "type": "request_implementation_mode",
+    "target": "self_edit_mra4bzhy_8txlih",
+    "reason": "The collaborator explicitly asked to try git again; current validation is passing, but commit and push are repository-affecting actions and must remain in separate high-risk implementation mode.",
+    "result": "implementation-mode transition requested as bounded data",
+    "timestamp": "2026-07-07T04:16:34.254Z"
+  },
+  "migration_history": [
+    {
+      "from_schema_version": 1,
+      "to_schema_version": 2,
+      "migrated_at": "2026-07-07T03:54:09.072Z",
+      "reason": "Expanded chamber-only world into bounded 2D avatar world."
+    }
+  ],
+  "location": "threshold",
+  "visited": [
+    "chamber",
+    "antechamber",
+    "threshold"
   ]
 }

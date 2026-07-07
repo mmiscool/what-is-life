@@ -89,7 +89,9 @@ Normal wake cycles remain bounded. The agent can write markdown requirements dra
 
 Source changes happen only after an explicit recorded transition into implementation mode. In implementation mode, Codex may modify source in a temporary workspace without human approval. The harness snapshots source code and bounded continuity data, restores continuity data before validation, validates the temporary workspace, copies validated source back to the live app, validates again, and rolls failed implementations back to the code snapshot.
 
-If the agent requests git activity in the self-edit record, the harness commits source changes after validation passes and attempts `git push` when requested. Git commit and push are skipped when validation fails or when source files were already dirty before implementation mode started.
+If the agent requests git activity in the self-edit record, the harness stages all changed, deleted, and untracked repository files, commits them with the requested commit message after validation passes, and immediately runs `git push`. Git commit and push are skipped when validation fails.
+
+The World tab renders the bounded 2D map and includes manual controls for moving the avatar, observing, resting, and inspecting current, adjacent, or visible simulated targets. These controls use the same validated world-action path as agent wake cycles and remain inside the simulated map.
 
 Interrupt criteria are storage-only in this version and remain disabled by default.
 

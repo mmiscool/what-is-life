@@ -80,7 +80,7 @@ Values are stored in `data/values.json`. Value revisions are recorded with the p
 
 Requirements drafts are stored in `data/requirements-drafts.json`. They are agent-authored markdown drafts with bounded metadata for title, purpose, scope, risk level, requested reviewer, review status, consent state, proposed tests, rollback plan, and affected continuity surfaces.
 
-Self-edit records are stored in `data/self-edit-records.json`. They record proposed source-affecting changes, risk level, authorization path, optional reviewer, proposed tests, rollback plan, affected surfaces, cited requirements drafts, validation result, rollback result, and optional git commit/push intent.
+Self-edit records are stored in `data/self-edit-records.json`. They record proposed source-affecting changes, risk level, authorization path, optional reviewer, proposed tests, rollback plan, affected surfaces, cited requirements drafts, validation result, rollback result, and optional git commit-and-push intent.
 
 Implementation handoffs are stored in `data/implementation-handoffs.json`. They provide Codex implementation mode with public continuity, values, relevant requirements drafts, wake state, action policy, restart requirements, and private-memory metadata only.
 
@@ -104,7 +104,7 @@ Before implementation, the harness records the mode transition and writes an imp
 
 If validation fails or implementation throws, the harness restores the code snapshot, records a rollback event, writes public feedback for the agent, and returns to normal wake mode. Continuity data is preserved when current live continuity validation still passes; the data snapshot is restored only when live continuity data has become invalid.
 
-If validation passes and the self-edit record requested git activity, the harness commits source changes with the requested commit message and attempts `git push` when requested. Git commit or push is skipped when validation fails. It is also skipped, with feedback to the agent, if source files were already dirty before implementation mode started so unrelated collaborator changes are not accidentally committed.
+If validation passes and the self-edit record requested git activity, the harness stages all changed, deleted, and untracked repository files, commits them with the requested commit message, and immediately runs `git push`. Git commit or push is skipped when validation fails.
 
 ## Validation And Rollback
 
@@ -143,6 +143,8 @@ The v1 world is a small persistent 2D map rendered with Canvas. It includes a co
 Normal wake actions are symbolic or bounded data actions: observe, move, inspect, write, refuse, rest, defer, ask the human collaborator, inspect bounded status, set a wake interval, write bounded requirements drafts, log low-risk reversible self-actions, request action review, request implementation mode, and draft disabled interrupt criteria.
 
 The bounded status surface summarizes mode, wake rhythm, validation status, pending requests, drafts, self-edit records, implementation handoffs, rollback or failure summaries, and boundary state without exposing private reflection content.
+
+The browser World tab includes bounded manual controls for movement, observing, resting, and inspection. Manual controls call the validated world-action endpoint, persist avatar movement and inspection state in `data/world-state.json`, and write public/audit records without exposing private reflection.
 
 ## Scope Through Boundaries
 

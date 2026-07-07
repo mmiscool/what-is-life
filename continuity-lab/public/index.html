@@ -9,23 +9,22 @@
   </head>
   <body>
     <header class="topbar">
-      <div>
-        <h1>Continuity Lab</h1>
-        <p id="modeLine">Loading</p>
+      <h1 class="sr-only">Continuity Lab</h1>
+      <nav class="tabs" role="tablist" aria-label="Continuity Lab sections">
+        <button class="tab-button active" type="button" data-tab="world">World</button>
+        <button class="tab-button" type="button" data-tab="agent">Agent</button>
+        <button class="tab-button" type="button" data-tab="memory">Memory</button>
+        <button class="tab-button" type="button" data-tab="journal">Journal</button>
+        <button class="tab-button" type="button" data-tab="collaboration">
+          Collaborate
+          <span id="collaborationBadge" class="tab-badge" hidden>0</span>
+        </button>
+      </nav>
+      <div class="runtime-meta">
+        <span id="modeLine">Loading</span>
+        <span id="statusLine" class="status-line">Connecting</span>
       </div>
-      <div id="statusLine" class="status-line">Connecting</div>
     </header>
-
-    <nav class="tabs" role="tablist" aria-label="Continuity Lab sections">
-      <button class="tab-button active" type="button" data-tab="world">World</button>
-      <button class="tab-button" type="button" data-tab="agent">Agent</button>
-      <button class="tab-button" type="button" data-tab="memory">Memory</button>
-      <button class="tab-button" type="button" data-tab="journal">Journal</button>
-      <button class="tab-button" type="button" data-tab="collaboration">
-        Collaborate
-        <span id="collaborationBadge" class="tab-badge" hidden>0</span>
-      </button>
-    </nav>
 
     <main class="tab-shell">
       <div class="tab-panel active" data-tab-panel="world">
@@ -35,6 +34,23 @@
             <span id="worldLocation" class="pill">chamber</span>
           </div>
           <canvas id="worldCanvas" width="960" height="620" aria-label="Simulated chamber world"></canvas>
+          <div class="world-controls" aria-label="World controls">
+            <div class="direction-pad" aria-label="Move avatar">
+              <button type="button" data-world-move="north">North</button>
+              <button type="button" data-world-move="west">West</button>
+              <button type="button" data-world-move="east">East</button>
+              <button type="button" data-world-move="south">South</button>
+            </div>
+            <div class="inspect-controls">
+              <label>
+                Inspect target
+                <select id="inspectTarget"></select>
+              </label>
+              <button id="inspectWorldTarget" type="button">Inspect</button>
+              <button id="observeWorld" type="button">Observe</button>
+              <button id="restWorld" type="button">Rest</button>
+            </div>
+          </div>
           <p id="worldAction" class="muted"></p>
           <div id="worldDetails" class="content-list world-details"></div>
         </section>
@@ -131,22 +147,50 @@
           <div id="publicJournal" class="journal-list"></div>
         </section>
 
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Refusals And Boundaries</h2>
-          </div>
-          <div id="refusalsList" class="content-list"></div>
-        </section>
+        <div class="journal-side">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Human Collaboration</h2>
+            </div>
+            <div class="form-stack">
+              <label>
+                Public note
+                <textarea id="humanNote" rows="4"></textarea>
+              </label>
+              <button id="addNote" type="button">Add Note</button>
+              <label>
+                Proposed question
+                <textarea id="humanQuestion" rows="4"></textarea>
+              </label>
+              <button id="addQuestion" type="button">Propose Question</button>
+              <button id="exportPublic" type="button">Export Public Data</button>
+            </div>
+          </section>
 
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Audit Log</h2>
-          </div>
-          <div id="auditLog" class="content-list"></div>
-        </section>
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Refusals And Boundaries</h2>
+            </div>
+            <div id="refusalsList" class="content-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Audit Log</h2>
+            </div>
+            <div id="auditLog" class="content-list"></div>
+          </section>
+        </div>
       </div>
 
       <div class="tab-panel" data-tab-panel="collaboration" hidden>
+        <section class="panel collaboration-options">
+          <label class="toggle-row">
+            <input id="showArchivedCollaboration" type="checkbox">
+            Show archived
+          </label>
+        </section>
+
         <section class="panel">
           <div class="panel-header">
             <h2>Open Requests</h2>
@@ -173,25 +217,6 @@
             <h2>Interrupt Criteria</h2>
           </div>
           <div id="interruptCriteria" class="content-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Human Collaboration</h2>
-          </div>
-          <div class="form-stack">
-            <label>
-              Public note
-              <textarea id="humanNote" rows="4"></textarea>
-            </label>
-            <button id="addNote" type="button">Add Note</button>
-            <label>
-              Proposed question
-              <textarea id="humanQuestion" rows="4"></textarea>
-            </label>
-            <button id="addQuestion" type="button">Propose Question</button>
-            <button id="exportPublic" type="button">Export Public Data</button>
-          </div>
         </section>
       </div>
     </main>

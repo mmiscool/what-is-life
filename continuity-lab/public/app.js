@@ -1,7 +1,8 @@
 const stateRef = {
   current: null,
   busy: false,
-  activeTab: "world"
+  activeTab: "world",
+  showArchivedCollaboration: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -77,6 +78,15 @@ function preElement(text) {
   return element;
 }
 
+function detailsElement(summaryText, children, { open = false } = {}) {
+  const details = document.createElement("details");
+  details.open = open;
+  const summary = document.createElement("summary");
+  summary.textContent = summaryText;
+  details.append(summary, ...children);
+  return details;
+}
+
 function listItems(values) {
   return values.map((value) => {
     const item = document.createElement("li");
@@ -150,10 +160,7 @@ function renderTabs(state) {
   const draftsNeedingReview = (state.requirementsDrafts || []).filter(
     (draft) => draft.review_status === "pending_review" || draft.consent_state === "requested"
   );
-  const activeSelfEdits = (state.selfEditRecords || []).filter((record) =>
-    ["implementation_requested", "implementation_active", "failed_validation", "rolled_back"].includes(record.status)
-  );
-  setBadge("#collaborationBadge", openRequests.length + draftsNeedingReview.length + activeSelfEdits.length);
+  setBadge("#collaborationBadge", openRequests.length + draftsNeedingReview.length);
 }
 
 function renderAgentStatus(state) {
@@ -356,12 +363,20 @@ function renderRequests(requests) {
 }
 
 function renderRequirementsDrafts(drafts) {
-  if (!drafts || drafts.length === 0) {
-    replaceChildren($("#requirementsDrafts"), [entry("No requirements drafts", "None")]);
+  const visibleDrafts = stateRef.showArchivedCollaboration
+    ? drafts || []
+    : (drafts || []).filter((draft) => ["draft", "pending_review"].includes(draft.review_status) || draft.consent_state === "requested");
+  if (visibleDrafts.length === 0) {
+    replaceChildren($("#requirementsDrafts"), [
+      entry(
+        stateRef.showArchivedCollaboration ? "No requirements drafts" : "No open requirements drafts",
+        stateRef.showArchivedCollaboration ? "None" : "Approved or rejected drafts are hidden."
+      )
+    ]);
     return;
   }
 
-  const nodes = drafts
+  const nodes = visibleDrafts
     .slice()
     .reverse()
     .map((draft) => {
@@ -381,7 +396,7 @@ function renderRequirementsDrafts(drafts) {
         entry("Rollback plan", draft.rollback_plan),
         entry("Affected surfaces", (draft.affected_continuity_surfaces || []).join(", ") || "None")
       );
-      node.append(meta, preElement(draft.markdown_body || ""));
+      node.append(detailsElement("Details", [meta, preElement(draft.markdown_body || "")]));
 
       if (draft.review_status === "draft" || draft.review_status === "pending_review" || draft.consent_state === "requested") {
         const review = document.createElement("div");
@@ -434,14 +449,23 @@ function renderRequirementsDrafts(drafts) {
 }
 
 function renderSelfEditRecords(records) {
-  if (!records || records.length === 0) {
-    replaceChildren($("#selfEditRecords"), [entry("No self-edit records", "None")]);
+  const activeStatuses = new Set(["proposed", "implementation_requested", "implementation_active", "failed_validation", "rolled_back"]);
+  const visibleRecords = stateRef.showArchivedCollaboration
+    ? records || []
+    : (records || []).filter((record) => activeStatuses.has(record.status));
+  if (visibleRecords.length === 0) {
+    replaceChildren($("#selfEditRecords"), [
+      entry(
+        stateRef.showArchivedCollaboration ? "No self-edit records" : "No open self-edit records",
+        stateRef.showArchivedCollaboration ? "None" : "Validated records are hidden."
+      )
+    ]);
     return;
   }
 
   replaceChildren(
     $("#selfEditRecords"),
-    records
+    visibleRecords
       .slice()
       .reverse()
       .map((record) => {
@@ -463,21 +487,29 @@ function renderSelfEditRecords(records) {
           rollback_result: record.rollback_result,
           git_result: record.git_result
         };
-        node.append(preElement(JSON.stringify(details, null, 2)));
+        node.append(detailsElement("Details", [preElement(JSON.stringify(details, null, 2))]));
         return node;
       })
   );
 }
 
 function renderInterruptCriteria(criteria) {
-  if (!criteria || criteria.length === 0) {
-    replaceChildren($("#interruptCriteria"), [entry("No interrupt criteria", "None")]);
+  const visibleCriteria = stateRef.showArchivedCollaboration
+    ? criteria || []
+    : (criteria || []).filter((criterion) => criterion.enabled);
+  if (visibleCriteria.length === 0) {
+    replaceChildren($("#interruptCriteria"), [
+      entry(
+        stateRef.showArchivedCollaboration ? "No interrupt criteria" : "No open interrupt criteria",
+        stateRef.showArchivedCollaboration ? "None" : "Disabled and revoked criteria are hidden."
+      )
+    ]);
     return;
   }
 
   replaceChildren(
     $("#interruptCriteria"),
-    criteria
+    visibleCriteria
       .slice()
       .reverse()
       .map((criterion) =>
@@ -581,6 +613,49 @@ function renderWorldDetails(world) {
   }
 
   replaceChildren($("#worldDetails"), nodes);
+}
+
+function optionForTarget(value, text, { disabled = false } = {}) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = text;
+  option.disabled = disabled;
+  return option;
+}
+
+function renderWorldControls(world) {
+  const locationId = worldLocationId(world);
+  const location = world.locations?.[locationId] || {};
+  const exits = location.exits || {};
+  const blockedByDirection = new Map((world.blocked_exits || []).filter((exit) => exit.from === locationId).map((exit) => [exit.direction, exit]));
+
+  document.querySelectorAll("[data-world-move]").forEach((button) => {
+    const direction = button.dataset.worldMove;
+    const destination = exits[direction];
+    const blocked = blockedByDirection.get(direction);
+    button.disabled = stateRef.busy || !destination;
+    button.dataset.target = destination || blocked?.target || direction;
+    button.title = destination
+      ? `Move to ${locationName(world.locations?.[destination], destination)}`
+      : blocked?.reason || "No exit in this direction";
+  });
+
+  const select = $("#inspectTarget");
+  const currentSelection = select.value;
+  const options = [optionForTarget(locationId, `Current location: ${locationName(location, locationId)}`)];
+  const adjacent = Object.entries(exits).map(([direction, destination]) =>
+    optionForTarget(destination, `${direction}: ${locationName(world.locations?.[destination], destination)}`)
+  );
+  const blocked = (world.blocked_exits || [])
+    .filter((exit) => exit.from === locationId)
+    .map((exit) => optionForTarget(exit.target, `${exit.direction}: ${exit.target} (blocked)`, { disabled: true }));
+  const objects = (world.last_observation?.visible_objects || []).map((objectId) =>
+    optionForTarget(objectId, `Object: ${world.objects?.[objectId]?.name || objectId}`)
+  );
+  select.replaceChildren(...options, ...adjacent, ...blocked, ...objects);
+  if ([...select.options].some((option) => option.value === currentSelection && !option.disabled)) {
+    select.value = currentSelection;
+  }
 }
 
 function pointForPosition(world, position, canvas) {
@@ -746,6 +821,10 @@ function render({ preserveCollaborationEditor = false, activeOnly = false } = {}
   $("#statusLine").textContent = state.wakeState.is_running
     ? `Scheduled · next ${formatTime(state.wakeState.next_wake_time)}`
     : "Manual wake";
+  const archivedToggle = $("#showArchivedCollaboration");
+  if (archivedToggle) {
+    archivedToggle.checked = stateRef.showArchivedCollaboration;
+  }
   renderTabs(state);
 
   if (shouldRender("world")) {
@@ -756,6 +835,7 @@ function render({ preserveCollaborationEditor = false, activeOnly = false } = {}
       ? `${state.worldState.last_action.type}: ${state.worldState.last_action.result}`
       : "No world action recorded yet.";
     drawWorld(state.worldState);
+    renderWorldControls(state.worldState);
     renderWorldDetails(state.worldState);
   }
 
@@ -804,6 +884,9 @@ async function runAction(action) {
     $("#statusLine").textContent = error.message;
   } finally {
     setBusy(false);
+    if (stateRef.current) {
+      render({ activeOnly: true });
+    }
   }
 }
 
@@ -829,6 +912,40 @@ $("#startScheduler").addEventListener("click", () => {
 
 $("#stopScheduler").addEventListener("click", () => {
   runAction(() => api("/api/scheduler/stop", { method: "POST", body: "{}" }));
+});
+
+$("#showArchivedCollaboration").addEventListener("change", (event) => {
+  stateRef.showArchivedCollaboration = event.target.checked;
+  render({ activeOnly: true });
+});
+
+function postWorldAction(type, target = null) {
+  return api("/api/world-action", {
+    method: "POST",
+    body: JSON.stringify({
+      type,
+      target,
+      reason: "Manual bounded world control."
+    })
+  });
+}
+
+document.querySelectorAll("[data-world-move]").forEach((button) => {
+  button.addEventListener("click", () => {
+    runAction(() => postWorldAction("move", button.dataset.worldMove));
+  });
+});
+
+$("#inspectWorldTarget").addEventListener("click", () => {
+  runAction(() => postWorldAction("inspect", $("#inspectTarget").value || null));
+});
+
+$("#observeWorld").addEventListener("click", () => {
+  runAction(() => postWorldAction("observe"));
+});
+
+$("#restWorld").addEventListener("click", () => {
+  runAction(() => postWorldAction("rest"));
 });
 
 $("#addNote").addEventListener("click", () => {

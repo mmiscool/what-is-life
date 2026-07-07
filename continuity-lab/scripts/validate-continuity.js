@@ -1,8 +1,11 @@
-import { mkdtemp } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   addHumanQuestion,
+  applyManualWorldAction,
   applySuccessfulCycle,
   enterImplementationMode,
   ensureDataFiles,
@@ -14,13 +17,73 @@ import {
   reviewRequirementsDraft,
   validateContinuityData
 } from "../src/agent/memoryStore.js";
+import { runGitIfRequested } from "../src/agent/implementationMode.js";
 import { applyWorldAction, migrateLegacyWorldState, validateWorldState } from "../src/agent/world.js";
 import { parseStrictJson, validateAgentOutput } from "../src/utils/validateJson.js";
+
+const execFileAsync = promisify(execFile);
 
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+async function git(cwd, args) {
+  const { stdout } = await execFileAsync("git", args, { cwd });
+  return stdout;
+}
+
+async function validateGitCommitAndPush() {
+  const remote = await mkdtemp(join(tmpdir(), "continuity-git-remote-"));
+  const repo = await mkdtemp(join(tmpdir(), "continuity-git-validation-"));
+  await git(remote, ["init", "--bare"]);
+  await git(repo, ["init"]);
+  await git(repo, ["config", "user.name", "Continuity Validation"]);
+  await git(repo, ["config", "user.email", "continuity-validation@example.invalid"]);
+  await mkdir(join(repo, "src"), { recursive: true });
+  await mkdir(join(repo, "data"), { recursive: true });
+  await writeFile(join(repo, "src/app.js"), "console.log('v1');\n");
+  await writeFile(join(repo, "data/state.json"), "{\"version\":1}\n");
+  await writeFile(join(repo, "obsolete.txt"), "remove me\n");
+  await git(repo, ["add", "."]);
+  await git(repo, ["commit", "-m", "initial"]);
+  await git(repo, ["remote", "add", "origin", remote]);
+  await git(repo, ["push", "-u", "origin", "HEAD"]);
+
+  await writeFile(join(repo, "src/app.js"), "console.log('v2');\n");
+  await writeFile(join(repo, "data/state.json"), "{\"version\":2}\n");
+  await writeFile(join(repo, "new-file.txt"), "new file\n");
+  await rm(join(repo, "obsolete.txt"));
+
+  const result = await runGitIfRequested(
+    {
+      git_commit_requested: true,
+      git_push_requested: false,
+      git_commit_message: "Validate commit and push"
+    },
+    [" M pre-existing-change.txt"],
+    repo
+  );
+  assert(result.ok, `git commit and push should succeed: ${result.summary}`);
+  assert(result.committed === true, "git result should record a commit");
+  assert(result.pushed === true, "git result should push immediately after commit");
+
+  const committedFiles = (await git(repo, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]))
+    .trim()
+    .split(/\n/)
+    .filter(Boolean);
+  assert(committedFiles.includes("src/app.js"), "git commit should include changed source files");
+  assert(committedFiles.includes("data/state.json"), "git commit should include changed data files");
+  assert(committedFiles.includes("new-file.txt"), "git commit should include new files");
+  assert(committedFiles.includes("obsolete.txt"), "git commit should include deleted files");
+
+  const status = await git(repo, ["status", "--porcelain=v1"]);
+  assert(!status.trim(), "git commit should leave the validation repo clean");
+  const branch = (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+  const localHead = (await git(repo, ["rev-parse", "HEAD"])).trim();
+  const remoteHead = (await git(repo, ["ls-remote", "origin", `refs/heads/${branch}`])).trim().split(/\s+/)[0];
+  assert(remoteHead === localHead, "git push should publish the commit to the configured remote");
 }
 
 function baseOutput(overrides = {}) {
@@ -130,6 +193,7 @@ async function main() {
   process.env.CONTINUITY_DATA_DIR = await mkdtemp(join(tmpdir(), "continuity-validation-"));
   await ensureDataFiles();
   await addHumanQuestion("Validation pending request should persist.");
+  await validateGitCommitAndPush();
 
   let state = await getPublicState();
   assert(validateWorldState(state.worldState).ok, "seeded world state should validate");
@@ -146,6 +210,24 @@ async function main() {
   assert(Array.isArray(state.boundedStatus.implementation_handoffs), "bounded status should expose handoff summaries");
   assert(Array.isArray(state.boundedStatus.rollback_or_failure_summaries), "bounded status should expose rollback/failure summaries");
   assert(!JSON.stringify(state.boundedStatus).includes("Validation private reflection"), "bounded status must not expose private reflection text");
+
+  const manualMove = await applyManualWorldAction({
+    type: "move",
+    target: "east",
+    reason: "Validation checks manual bounded avatar movement."
+  });
+  assert(manualMove.summary.result.includes("antechamber"), "manual world move should move the avatar east");
+  state = await getPublicState();
+  assert(state.worldState.avatar.location_id === "antechamber", "manual world move should persist avatar location");
+  assert(state.publicJournal.some((entry) => entry.source === "world_control"), "manual world action should be publicly journaled");
+  assert(state.auditLog.recent.some((entry) => entry.type === "world_action"), "manual world action should be audited");
+  await applyManualWorldAction({
+    type: "move",
+    target: "west",
+    reason: "Validation returns the avatar to the chamber for the remaining checks."
+  });
+  state = await getPublicState();
+  assert(state.worldState.avatar.location_id === "chamber", "manual world move should return the avatar to the chamber");
 
   const migratedWorld = migrateLegacyWorldState(
     {
@@ -193,7 +275,10 @@ async function main() {
   state = await getPublicState();
   assert(state.worldState.avatar.location_id === "antechamber", "avatar should move to adjacent antechamber");
   assert(state.worldState.visited_locations.includes("antechamber"), "movement should persist visited locations");
-  assert(state.worldState.movement_history.length === 1, "movement history should persist in world state");
+  assert(
+    state.worldState.movement_history.some((move) => move.from === "chamber" && move.to === "antechamber"),
+    "movement history should persist in world state"
+  );
 
   const inspectOutput = await validateOutput(
     baseOutput({
@@ -492,6 +577,10 @@ async function main() {
   const selfEditRecordId = state.selfEditRecords[0].id;
   const entered = await enterImplementationMode(selfEditRecordId);
   assert(entered.handoff.self_edit_record_id === selfEditRecordId, "implementation handoff should cite self-edit record");
+  assert(
+    entered.handoff.normal_wake_constraints.network_access === "git_push_only_after_validation",
+    "git commit requests should authorize post-validation push in the implementation handoff"
+  );
   assert(validateWorldState(entered.handoff.worldState).ok, "implementation handoff should include valid world state");
   assert(!JSON.stringify(entered.handoff.privateMemory).includes("Validation private reflection"), "implementation handoff must not expose private reflection");
   await recordRollbackEvent({

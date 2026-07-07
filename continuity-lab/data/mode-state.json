@@ -10,8 +10,8 @@
     "rollback"
   ],
   "active_self_edit_record_id": null,
-  "entered_at": "2026-07-07T03:26:59.673Z",
-  "exited_at": "2026-07-07T03:28:18.880Z",
+  "entered_at": "2026-07-07T04:16:34.289Z",
+  "exited_at": "2026-07-07T04:18:47.051Z",
   "transition_history": [
     {
       "from": "normal_wake",
@@ -57,6 +57,21 @@
       "timestamp": "2026-07-07T03:28:18.880Z",
       "source": "implementation_mode_result",
       "status": "validated"
+    },
+    {
+      "from": "normal_wake",
+      "to": "implementation",
+      "self_edit_record_id": "self_edit_mra500yf_wzfvog",
+      "timestamp": "2026-07-07T04:16:34.289Z",
+      "source": "agent_self_edit_request"
+    },
+    {
+      "from": "implementation",
+      "to": "normal_wake",
+      "self_edit_record_id": "self_edit_mra500yf_wzfvog",
+      "timestamp": "2026-07-07T04:18:47.051Z",
+      "source": "implementation_mode_result",
+      "status": "rolled_back"
     }
   ]
 }

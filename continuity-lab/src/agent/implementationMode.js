@@ -285,11 +285,11 @@ Rules:
 - Keep normal wake cycles bounded unless this request explicitly changes a validated boundary.
 - Do not expose private reflection; the handoff contains metadata only.
 - Run relevant checks if practical. The harness will run validation after this turn.
-- Do not git commit or push directly. If requested, the harness will commit or push after validation passes.
+- Do not git commit or push directly. If requested, the harness will commit all repository changes and push after validation passes.
 - Report a concise implementation summary and list changed source files.`;
 }
 
-async function runCodexImplementation(record, handoff, preExistingSourceChanges, workspaceRoot, snapshotRoot) {
+async function runCodexImplementation(record, handoff, preExistingRepoChanges, workspaceRoot, snapshotRoot) {
   const codex = new Codex();
   const thread = codex.startThread({
     sandboxMode: "workspace-write",
@@ -305,7 +305,7 @@ async function runCodexImplementation(record, handoff, preExistingSourceChanges,
     ok: true,
     thread_id: thread.id,
     final_response: truncate(turn.finalResponse || ""),
-    pre_existing_source_changes: preExistingSourceChanges,
+    pre_existing_repo_changes: preExistingRepoChanges,
     changed_files: changedFiles,
     source_diff_stat: changedFiles.join("\n"),
     implementation_workspace: workspaceRoot,
@@ -341,17 +341,42 @@ async function runPostChangeValidation(cwd = projectRoot()) {
   };
 }
 
-async function changedSourceFiles(cwd = projectRoot()) {
-  const status = await runCommand("git", ["status", "--short", "--untracked-files=all"], { allowFailure: true, cwd });
-  return status.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.slice(3).trim())
-    .filter((file) => file && !file.startsWith("data/") && file !== ".env" && !file.startsWith("node_modules/"));
+async function readGitRoot(cwd = projectRoot()) {
+  const root = await runCommand("git", ["rev-parse", "--show-toplevel"], {
+    allowFailure: true,
+    cwd
+  });
+  return {
+    ok: root.ok,
+    command: root,
+    gitRoot: root.ok ? root.stdout.trim() : null
+  };
 }
 
-async function runGitIfRequested(record, preExistingSourceChanges) {
+async function readRepoChanges(cwd = projectRoot()) {
+  const root = await readGitRoot(cwd);
+  if (!root.ok) {
+    return {
+      ok: false,
+      status: root.command,
+      files: [],
+      gitRoot: null
+    };
+  }
+
+  const status = await runCommand("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+    allowFailure: true,
+    cwd: root.gitRoot
+  });
+  return {
+    ok: status.ok,
+    status,
+    files: status.ok ? status.stdout.split(/\r?\n/).filter(Boolean) : [],
+    gitRoot: root.gitRoot
+  };
+}
+
+export async function runGitIfRequested(record, preExistingRepoChanges = [], cwd = projectRoot()) {
   if (!record.git_commit_requested && !record.git_push_requested) {
     return {
       ok: true,
@@ -361,27 +386,39 @@ async function runGitIfRequested(record, preExistingSourceChanges) {
     };
   }
 
-  if (preExistingSourceChanges.length > 0) {
+  const commitMessage = typeof record.git_commit_message === "string" ? record.git_commit_message.trim() : "";
+  if (!commitMessage) {
     return {
       ok: false,
-      summary: "Git commit/push skipped because source files were already dirty before implementation mode.",
-      committed: false,
-      pushed: false,
-      pre_existing_source_changes: preExistingSourceChanges
-    };
-  }
-
-  const files = await changedSourceFiles();
-  if (files.length === 0) {
-    return {
-      ok: true,
-      summary: "No source changes to commit.",
+      summary: "Git commit/push requires a commit message.",
       committed: false,
       pushed: false
     };
   }
 
-  const add = await runCommand("git", ["add", "--", ...files], { allowFailure: true });
+  const changed = await readRepoChanges(cwd);
+  if (!changed.ok) {
+    return {
+      ok: false,
+      summary: "Git status failed.",
+      committed: false,
+      pushed: false,
+      status: changed.status
+    };
+  }
+
+  const gitRoot = changed.gitRoot || cwd;
+  if (changed.files.length === 0) {
+    return {
+      ok: true,
+      summary: "No repository changes to commit or push.",
+      committed: false,
+      pushed: false,
+      pre_existing_repo_changes: preExistingRepoChanges
+    };
+  }
+
+  const add = await runCommand("git", ["add", "-A"], { allowFailure: true, cwd: gitRoot });
   if (!add.ok) {
     return {
       ok: false,
@@ -392,33 +429,28 @@ async function runGitIfRequested(record, preExistingSourceChanges) {
     };
   }
 
-  const commit = await runCommand("git", ["commit", "-m", record.git_commit_message], { allowFailure: true });
+  const commit = await runCommand("git", ["commit", "-m", commitMessage], {
+    allowFailure: true,
+    cwd: gitRoot
+  });
   if (!commit.ok) {
     return {
       ok: false,
       summary: "Git commit failed.",
       committed: false,
       pushed: false,
+      pre_existing_repo_changes: preExistingRepoChanges,
       commit
     };
   }
 
-  if (!record.git_push_requested) {
-    return {
-      ok: true,
-      summary: "Committed source changes; push not requested.",
-      committed: true,
-      pushed: false,
-      commit
-    };
-  }
-
-  const push = await runCommand("git", ["push"], { allowFailure: true });
+  const push = await runCommand("git", ["push"], { allowFailure: true, cwd: gitRoot });
   return {
     ok: push.ok,
-    summary: push.ok ? "Committed and pushed source changes." : "Commit succeeded but git push failed.",
+    summary: push.ok ? "Committed and pushed repository changes." : "Commit succeeded but git push failed.",
     committed: true,
     pushed: push.ok,
+    pre_existing_repo_changes: preExistingRepoChanges,
     commit,
     push
   };
@@ -433,7 +465,7 @@ export async function runAutonomousImplementation(recordId) {
   let initialContinuityValidation = null;
   try {
     entered = await enterImplementationMode(recordId);
-    const preExistingSourceChanges = await changedSourceFiles();
+    const preExistingRepoChanges = await readRepoChanges();
     initialContinuityValidation = await validateContinuityData();
     if (!initialContinuityValidation.ok) {
       const error = new Error("Continuity data failed validation after implementation mode entry.");
@@ -446,7 +478,7 @@ export async function runAutonomousImplementation(recordId) {
     implementationResult = await runCodexImplementation(
       entered.record,
       entered.handoff,
-      preExistingSourceChanges,
+      preExistingRepoChanges.ok ? preExistingRepoChanges.files : [],
       implementationWorkspace,
       snapshotRoot
     );
@@ -554,7 +586,7 @@ export async function runAutonomousImplementation(recordId) {
       };
     }
 
-    const gitResult = await runGitIfRequested(entered.record, preExistingSourceChanges);
+    const gitResult = await runGitIfRequested(entered.record, preExistingRepoChanges.ok ? preExistingRepoChanges.files : []);
     const record = await recordImplementationModeResult({
       recordId,
       status: "validated",
